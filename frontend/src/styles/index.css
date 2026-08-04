@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --primary: #0ea5a4;
+}
+
+body{ background: #0b0f14 }
+
+.backdrop-blur-sm{ backdrop-filter: blur(6px) }
+
+.bg-primary{ background-color: var(--primary) }
