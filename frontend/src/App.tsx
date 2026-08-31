@@ -1,27 +1,32 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import Home from './pages/Home'
 import Join from './pages/Join'
 import Admin from './pages/Admin'
 import './styles/index.css'
 
-export default function App(){
+export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-[radial-gradient(ellipse_at_bottom_right,_var(--tw-gradient-stops))] from-gray-900 via-gray-900 to-black text-white">
-        <header className="p-6 flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Secret Game</h1>
-          <nav className="space-x-4">
-            <Link to="/" className="hover:underline">Home</Link>
-            <Link to="/join" className="hover:underline">Meedoen</Link>
-            <Link to="/admin" className="hover:underline">Admin</Link>
-          </nav>
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <header className="border-b border-white/10 bg-slate-950/80 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+            <Link to="/" className="text-xl font-bold tracking-[0.22em] text-white uppercase">
+              Secret Game
+            </Link>
+            <nav className="flex items-center gap-4 text-sm text-slate-300">
+              <Link to="/" className="transition hover:text-white">Home</Link>
+              <Link to="/join" className="transition hover:text-white">Meedoen</Link>
+              <Link to="/admin" className="transition hover:text-white">Admin</Link>
+            </nav>
+          </div>
         </header>
-        <main className="p-4">
+
+        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
           <Routes>
-            <Route path="/" element={<Home/>} />
-            <Route path="/join" element={<Join/>} />
-            <Route path="/admin" element={<Admin/>} />
+            <Route path="/" element={<Home />} />
+            <Route path="/join" element={<Join />} />
+            <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>
       </div>

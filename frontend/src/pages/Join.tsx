@@ -1,42 +1,75 @@
-import React, { useState } from 'react'
+import React, { FormEvent, useState } from 'react'
+import { API_BASE_URL, CONFIG } from '../config'
 
-export default function Join(){
+export default function Join() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<'idle'|'loading'|'success'|'error'>('idle')
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [message, setMessage] = useState('')
 
-  async function submit(e: React.FormEvent){
-    e.preventDefault()
+  async function submit(event: FormEvent) {
+    event.preventDefault()
     setStatus('loading')
-    try{
-      const res = await fetch((import.meta.env.VITE_BACKEND_URL || '') + '/join', {
+    setMessage('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email })
       })
-      if(res.ok){
+
+      const data = await response.json().catch(() => ({}))
+      if (response.ok) {
         setStatus('success')
+        setMessage(data.message || 'Succes! Je bent aangemeld.')
         setName('')
         setEmail('')
-      }else{
+      } else {
         setStatus('error')
+        setMessage(data.message || 'Er is iets misgegaan. Probeer later opnieuw.')
       }
-    }catch(err){
+    } catch (_error) {
       setStatus('error')
+      setMessage('Er is iets misgegaan. Probeer later opnieuw.')
     }
   }
 
   return (
-    <div className="max-w-md mx-auto">
-      <div className="backdrop-blur-sm bg-white/5 rounded-2xl p-6 shadow-lg">
-        <h3 className="text-2xl font-bold mb-4">Meedoen</h3>
-        <form onSubmit={submit} className="space-y-4">
-          <input required value={name} onChange={e=>setName(e.target.value)} placeholder="Naam" className="w-full p-3 rounded-full bg-white/5" />
-          <input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="w-full p-3 rounded-full bg-white/5" />
-          <button className="w-full bg-primary p-3 rounded-full font-semibold" disabled={status==='loading'}>Verstuur</button>
+    <div className="mx-auto max-w-lg">
+      <div className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/30 sm:p-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-violet-300">Aanmelden</p>
+        <h2 className="mt-3 text-3xl font-bold text-white">{CONFIG.game_name}</h2>
+        <p className="mt-2 text-slate-300">Vul je naam en email in om mee te doen aan het geheimspel.</p>
+
+        <form onSubmit={submit} className="mt-6 space-y-4">
+          <input
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Naam"
+            className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-violet-400"
+          />
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="Email"
+            className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-violet-400"
+          />
+          <button
+            type="submit"
+            disabled={status === 'loading'}
+            className="w-full rounded-full bg-violet-500 px-4 py-3 font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {status === 'loading' ? 'Versturen…' : 'Verstuur'}
+          </button>
         </form>
-        {status==='success' && <p className="mt-4 text-green-400">Succes! Je bent aangemeld.</p>}
-        {status==='error' && <p className="mt-4 text-red-400">Er is iets misgegaan. Probeer later opnieuw.</p>}
+
+        {message && (
+          <p className={`mt-4 ${status === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>{message}</p>
+        )}
       </div>
     </div>
   )

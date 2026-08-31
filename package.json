@@ -1,0 +1,13 @@
+{
+  "name": "secret-game",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "pnpm --dir frontend dev",
+    "build": "pnpm --dir frontend build",
+    "typecheck": "pnpm --dir frontend exec tsc --noEmit"
+  }
+}
