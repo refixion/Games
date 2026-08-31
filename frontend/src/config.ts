@@ -58,5 +58,3 @@ export const CONFIG = {
 }
 
 export const API_BASE_URL = '/api'
-  .replace(/\/$/, '')
-  .replace(/\/api$/, '')
