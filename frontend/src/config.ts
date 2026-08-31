@@ -57,6 +57,6 @@ export const CONFIG = {
   logo: ''
 }
 
-export const API_BASE_URL = (import.meta.env.VITE_BACKEND_URL || '')
+export const API_BASE_URL = '/api'
   .replace(/\/$/, '')
   .replace(/\/api$/, '')
