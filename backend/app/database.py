@@ -27,6 +27,12 @@ async def init_db():
                 );
                 '''
             )
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS role TEXT")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS target TEXT")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS secret_info TEXT")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_preset TEXT DEFAULT 'murder_mystery'")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'registered'")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()")
             await conn.execute(
                 '''
                 CREATE TABLE IF NOT EXISTS game_state (
@@ -54,6 +60,16 @@ async def init_db():
                     False,
                     'draft',
                 )
+            await conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS poll_votes (
+                    id SERIAL PRIMARY KEY,
+                    game_preset TEXT NOT NULL,
+                    voter_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+                );
+                '''
+            )
     finally:
         await pool.close()
 
