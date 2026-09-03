@@ -1,9 +1,17 @@
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.database import init_db
 from app.routes import router
 
-app = FastAPI(title='Secret Game API')
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await init_db()
+    yield
+
+app = FastAPI(title='Secret Game API', lifespan=lifespan)
 
 allowed_origins = [
     origin.strip()

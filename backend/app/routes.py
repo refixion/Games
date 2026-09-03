@@ -1,37 +1,101 @@
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
-import asyncpg
-import secrets
 import hashlib
+import json
+import logging
+import random
+from typing import Any
+
+import asyncpg
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import get_pool
-from .email import send_secret_email
-from .schemas import GameSelectIn, JoinIn, StatusIn, ToggleIn, VoteIn
+from .email import build_secret_email, send_secret_email
+from .schemas import GameSelectIn, JoinIn, PollIn, StatusIn, ToggleIn, VoteIn
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api')
 
-GAME_PRESETS = [
-    {'id': 'murder_mystery', 'label': 'Murder Mystery', 'description': 'Een tafel vol verdachten, geheimen en een zaak die opgelost moet worden.', 'type': 'Murder mystery', 'roles': ['Murderer', 'Detective', 'Citizen'], 'theme': {'primary': '#b45309', 'accent': '#fbbf24'}},
-    {'id': 'the_heist', 'label': 'The Heist', 'description': 'Plan een gewaagde kraak terwijl niemand zeker weet wie aan welke kant staat.', 'type': 'Team strategy', 'roles': ['Boss', 'Inside Man', 'Banker', 'Operative'], 'theme': {'primary': '#2563eb', 'accent': '#f59e0b'}},
-    {'id': 'the_investigation', 'label': 'The Investigation', 'description': 'Leg getuigenissen, documenten en tegenstrijdige motieven naast elkaar.', 'type': 'Investigation', 'roles': ['Detective', 'Witness', 'Archivist', 'Suspect'], 'theme': {'primary': '#0f766e', 'accent': '#99f6e4'}},
-]
-VALID_STATUSES = {'draft', 'registration_open', 'registration_closed', 'game_started', 'finished'}
+GAME_CONFIGS: dict[str, dict[str, Any]] = {
+    'murder_mystery': {
+        'id': 'murder_mystery', 'name': 'Murder Mystery', 'type': 'Mysterie',
+        'description': "Een moordzaak vol geheimen, alibi's en tegenstrijdige aanwijzingen.",
+        'goal': 'Ontmasker de Murderer voordat de zaak wordt gesloten.',
+        'rules': ['Deel alleen informatie die jouw rol mag delen.', 'De Detective leidt het onderzoek.', 'De Murderer wint als de verdenking op een Citizen blijft.'],
+        'steps': ['Ontvang je rol', 'Onderzoek de clues', "Bespreek alibi's", 'Stem een verdachte weg'],
+        'roles': [
+            {'name': 'Murderer', 'description': 'Je hebt het misdrijf gepleegd en moet uit handen van de groep blijven.', 'personal_info': 'Je was als laatste in de archiefkamer.', 'clues': ['Een rode draad is gevonden bij de achterdeur.', 'Je kent het echte tijdstip van de moord.'], 'instructions': 'Ontken rustig, stuur verdenking richting een ander en vertel je geheime tijdstip niet.'},
+            {'name': 'Detective', 'description': 'Jij verzamelt verklaringen en probeert de dader logisch aan te wijzen.', 'personal_info': 'Je bezit een sleutel die niet bij het slachtoffer hoort.', 'clues': ['De klok in de hal loopt zeven minuten achter.', 'Een getuige verzwijgt een naam.'], 'instructions': 'Deel je conclusies, maar bewaar je sterkste aanwijzing voor het juiste moment.'},
+            {'name': 'Citizen', 'description': 'Je bent een oplettende aanwezige die de waarheid kan helpen vinden.', 'personal_info': 'Je zag iemand gehaast de hal verlaten.', 'clues': ['Er ontbreekt een handschoen.', 'Het raam stond van binnen open.'], 'instructions': 'Vertel wat je zag zonder je vermoedens als feiten te presenteren.'},
+        ],
+        'theme': {'primary': '#9f1239', 'accent': '#f59e0b'},
+    },
+    'the_heist': {
+        'id': 'the_heist', 'name': 'The Heist', 'type': 'Teamstrategie',
+        'description': 'Een gewaagde kraak waarin vertrouwen net zo waardevol is als de buit.',
+        'goal': 'Voltooi de kraak en ontdek wie het plan saboteert.',
+        'rules': ['Bespreek openbare informatie hardop.', 'Geheime clues deel je alleen als dat strategisch slim is.', 'De Boss bepaalt het plan, maar iedereen heeft een eigen agenda.'],
+        'steps': ['Lees je briefing', 'Maak een plan', 'Controleer de kluis', 'Onthul de saboteur'],
+        'roles': [
+            {'name': 'Boss', 'description': 'Jij stuurt de operatie en kent het vluchtplan.', 'personal_info': 'De kluis opent om 22:15 met een code in drie delen.', 'clues': ['De bewaker wisselt om 21:50 van route.', 'Een insider heeft een valse badge.'], 'instructions': 'Houd het vluchtplan compact en let op wie het risico onnodig groter maakt.'},
+            {'name': 'Inside Man', 'description': 'Jij werkt binnen de bank en hebt toegang tot het beveiligingssysteem.', 'personal_info': 'Camera 4 heeft een blinde hoek van 90 seconden.', 'clues': ['De achteringang wordt niet op video opgeslagen.', 'De alarmcode bevat de geboortedag van de manager.'], 'instructions': 'Geef bruikbare toegangsinformatie, maar maak je positie niet openbaar.'},
+            {'name': 'Banker', 'description': 'Jij kent de geldstromen en kunt echte biljetten van lokgeld onderscheiden.', 'personal_info': 'De blauwe koffer bevat de echte buit.', 'clues': ['De blauwe koffer heeft een beschadigd slot.', 'De kluisvloer heeft een drukgevoelige tegel.'], 'instructions': 'Bescherm jouw kennis over de buit totdat het team een plan heeft.'},
+            {'name': 'Operative', 'description': 'Jij voert de risicovolle acties uit en kent het terrein.', 'personal_info': 'Er is een onderhoudstunnel achter de lift.', 'clues': ['De lift wordt op afstand gevolgd.', 'In de tunnel ligt een reservejas.'], 'instructions': 'Blijf praktisch, maar vertel niet meteen welke uitgang jij wilt gebruiken.'},
+        ],
+        'theme': {'primary': '#1d4ed8', 'accent': '#f59e0b'},
+    },
+    'the_investigation': {
+        'id': 'the_investigation', 'name': 'The Investigation', 'type': 'Onderzoek',
+        'description': 'Leg getuigenissen, documenten en motieven naast elkaar tot het verhaal klopt.',
+        'goal': 'Bouw een betrouwbare tijdlijn en wijs de Suspect aan.',
+        'rules': ['Bronvermeldingen maken informatie sterker.', 'Een Witness mag details vergeten, maar niet bewust vervormen.', 'De Archivist beheert de documenten.'],
+        'steps': ['Ontvang dossiers', 'Maak een tijdlijn', 'Vergelijk getuigenissen', 'Presenteer de conclusie'],
+        'roles': [
+            {'name': 'Detective', 'description': 'Je leidt het onderzoek en test elke theorie.', 'personal_info': 'Je hebt een ontbrekend dossier gevonden.', 'clues': ['De tijdlijn heeft een gat van twaalf minuten.', 'Een handtekening is nagemaakt.'], 'instructions': 'Stel gerichte vragen en leg vast welke bron elke conclusie ondersteunt.'},
+            {'name': 'Witness', 'description': 'Jij zag een cruciaal moment, maar niet alles was duidelijk.', 'personal_info': 'Je hoorde een metalen klik vlak voor het licht uitging.', 'clues': ['De stem kwam uit de westelijke gang.', 'De geur van dennenhout bleef hangen.'], 'instructions': 'Maak onderscheid tussen wat je zag, hoorde en denkt te hebben gezien.'},
+            {'name': 'Archivist', 'description': 'Jij bewaart documenten en herkent wijzigingen in oude dossiers.', 'personal_info': 'Een pagina is recent uit dossier 12 vervangen.', 'clues': ['De inkt op pagina 4 is nieuwer.', 'Het zegel staat ondersteboven.'], 'instructions': 'Laat documenten gecontroleerd rondgaan en vermeld ontbrekende stukken.'},
+            {'name': 'Suspect', 'description': 'Jouw motief lijkt sterk, maar het volledige verhaal is ingewikkelder.', 'personal_info': 'Je was op de locatie, maar verliet die vóór het incident.', 'clues': ['Je hebt een geldig alibi voor het laatste kwartier.', 'Iemand anders gebruikte jouw pen.'], 'instructions': 'Verdedig jezelf met controleerbare feiten en onthul je motief pas wanneer nodig.'},
+        ],
+        'theme': {'primary': '#0f766e', 'accent': '#fbbf24'},
+    },
+}
+VALID_STATUSES = {'draft', 'registration_open', 'registration_closed', 'started', 'finished'}
 
 
-def preset_exists(preset_id: str):
-    return next((preset for preset in GAME_PRESETS if preset['id'] == preset_id), None)
+def config_for(preset_id: str) -> dict[str, Any]:
+    config = GAME_CONFIGS.get(preset_id)
+    if not config:
+        raise HTTPException(status_code=400, detail='Onbekende game.')
+    return config
 
 
-async def get_game_state(conn):
-    row = await conn.fetchrow('SELECT id, game_name, game_preset, registration_open, voting_active, status, theme, updated_at FROM game_state ORDER BY id LIMIT 1')
-    return dict(row) if row else None
+def public_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {**config, 'roles': [{'name': role['name'], 'description': role['description']} for role in config['roles']]}
 
 
 async def admin_check(request: Request):
-    header = request.headers.get('x-admin-password', '')
-    if not header or header != settings.admin_password:
-        raise HTTPException(status_code=401, detail='Unauthorized')
+    if not settings.admin_password or request.headers.get('x-admin-password', '') != settings.admin_password:
+        raise HTTPException(status_code=401, detail='Admin-authenticatie mislukt.')
+
+
+async def state_row(conn):
+    row = await conn.fetchrow('SELECT id, game_name, game_preset, registration_open, voting_active, status, theme, updated_at FROM game_state ORDER BY id LIMIT 1')
+    if not row:
+        raise HTTPException(status_code=503, detail='Spelstatus ontbreekt in de database.')
+    return dict(row)
+
+
+async def poll_payload(conn, include_results=False):
+    poll = await conn.fetchrow('SELECT id, question, active FROM polls ORDER BY id LIMIT 1')
+    if not poll:
+        return {'active': False, 'question': '', 'options': []}
+    options = await conn.fetch('SELECT id, label FROM poll_options WHERE poll_id=$1 ORDER BY sort_order, id', poll['id'])
+    payload = {'active': poll['active'], 'question': poll['question'], 'options': [dict(option) for option in options]}
+    if include_results:
+        rows = await conn.fetch('SELECT o.id, o.label, count(v.id)::int AS votes FROM poll_options o LEFT JOIN poll_votes v ON v.option_id=o.id WHERE o.poll_id=$1 GROUP BY o.id ORDER BY o.sort_order, o.id', poll['id'])
+        payload['results'] = [dict(row) for row in rows]
+        payload['total'] = sum(row['votes'] for row in rows)
+    return payload
 
 
 @router.get('/health')
@@ -41,10 +105,7 @@ async def health():
 
 @router.get('/game-config')
 async def game_config():
-    return {
-        'game_name': settings.app_name,
-        'presets': GAME_PRESETS,
-    }
+    return {'game_name': settings.app_name, 'games': [public_config(config) for config in GAME_CONFIGS.values()]}
 
 
 @router.get('/game-state')
@@ -52,45 +113,41 @@ async def game_state():
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            return await get_game_state(conn)
+            state = await state_row(conn)
+            return {'state': state, 'game': public_config(config_for(state['game_preset'])), 'poll': await poll_payload(conn)}
     finally:
         await pool.close()
 
 
 @router.post('/join')
 async def join(payload: JoinIn):
+    name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail='Vul een geldige naam in.')
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             state = await conn.fetchrow('SELECT registration_open, game_preset FROM game_state ORDER BY id LIMIT 1')
-            if state and not state['registration_open']:
-                return JSONResponse(status_code=400, content={'success': False, 'message': 'De inschrijving is gesloten.'})
+            if not state or not state['registration_open']:
+                return JSONResponse(status_code=400, content={'success': False, 'message': 'Deelnemersregistratie is gesloten.'})
             try:
-                await conn.execute(
-                    'INSERT INTO players(name, email, game_preset, status) VALUES($1, $2, $3, $4)',
-                    payload.name,
-                    str(payload.email),
-                    state['game_preset'] if state else 'murder_mystery',
-                    'registered',
-                )
+                await conn.execute('INSERT INTO players(name, email, game_preset, status) VALUES($1, $2, $3, $4)', name, str(payload.email).lower(), state['game_preset'], 'registered')
             except asyncpg.UniqueViolationError:
-                return JSONResponse(status_code=400, content={'success': False, 'message': 'Deze email is al aangemeld.'})
+                return JSONResponse(status_code=409, content={'success': False, 'message': 'Deze email is al aangemeld.'})
     finally:
         await pool.close()
-    return {'success': True, 'message': 'Je bent aangemeld.'}
+    return {'success': True, 'message': 'Je bent aangemeld. Houd je inbox in de gaten.'}
 
 
 @router.post('/game/select')
 async def select_game(payload: GameSelectIn, request: Request):
     await admin_check(request)
-    preset = preset_exists(payload.game_preset)
-    if not preset:
-        raise HTTPException(status_code=400, detail='Onbekende game.')
+    config = config_for(payload.game_preset)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            await conn.execute('UPDATE game_state SET game_preset=$1, game_name=$2, theme=$3, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', preset['id'], preset['label'], preset['theme'])
-            return await get_game_state(conn)
+            await conn.execute('UPDATE game_state SET game_preset=$1, game_name=$2, theme=$3, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', config['id'], config['name'], json.dumps(config['theme']))
+            return await state_row(conn)
     finally:
         await pool.close()
 
@@ -103,9 +160,49 @@ async def set_status(payload: StatusIn, request: Request):
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            registration_open = payload.status == 'registration_open'
-            await conn.execute('UPDATE game_state SET status=$1, registration_open=$2, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', payload.status, registration_open)
-            return await get_game_state(conn)
+            await conn.execute('UPDATE game_state SET status=$1, registration_open=$2, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', payload.status, payload.status == 'registration_open')
+            return await state_row(conn)
+    finally:
+        await pool.close()
+
+
+@router.post('/admin/registration')
+async def registration(payload: ToggleIn, request: Request):
+    await admin_check(request)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute('UPDATE game_state SET registration_open=$1, status=$2, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', payload.active, 'registration_open' if payload.active else 'registration_closed')
+            return await state_row(conn)
+    finally:
+        await pool.close()
+
+
+@router.get('/poll')
+async def get_poll():
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            return await poll_payload(conn)
+    finally:
+        await pool.close()
+
+
+@router.post('/poll')
+@router.post('/admin/poll')
+async def configure_poll(payload: PollIn, request: Request):
+    await admin_check(request)
+    options = [option.strip() for option in payload.options if option.strip()]
+    if len(options) < 2 or len(set(options)) != len(options):
+        raise HTTPException(status_code=400, detail='Voeg minstens twee unieke opties toe.')
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            poll_id = await conn.fetchval('SELECT id FROM polls ORDER BY id LIMIT 1')
+            await conn.execute('UPDATE polls SET question=$1, active=FALSE, updated_at=now() WHERE id=$2', payload.question.strip(), poll_id)
+            await conn.execute('DELETE FROM poll_options WHERE poll_id=$1', poll_id)
+            await conn.executemany('INSERT INTO poll_options(poll_id, label, sort_order) VALUES($1, $2, $3)', [(poll_id, option, index) for index, option in enumerate(options)])
+            return await poll_payload(conn, include_results=True)
     finally:
         await pool.close()
 
@@ -116,55 +213,55 @@ async def toggle_poll(payload: ToggleIn, request: Request):
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            await conn.execute('UPDATE game_state SET voting_active=$1, updated_at=now() WHERE id=(SELECT id FROM game_state ORDER BY id LIMIT 1)', payload.active)
-            return {'active': payload.active}
+            poll_id = await conn.fetchval('SELECT id FROM polls ORDER BY id LIMIT 1')
+            await conn.execute('UPDATE polls SET active=$1, updated_at=now() WHERE id=$2', payload.active, poll_id)
+            return await poll_payload(conn, include_results=True)
     finally:
         await pool.close()
 
 
 @router.post('/poll/vote')
 async def vote(payload: VoteIn, request: Request):
-    if not preset_exists(payload.game_preset):
-        raise HTTPException(status_code=400, detail='Onbekende game.')
-    token = request.headers.get('x-vote-token', '')
+    token = request.headers.get('x-vote-token') or (request.client.host if request.client else '')
     if not token:
         raise HTTPException(status_code=400, detail='Stemtoken ontbreekt.')
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            active = await conn.fetchval('SELECT voting_active FROM game_state ORDER BY id LIMIT 1')
-            if not active:
-                raise HTTPException(status_code=400, detail='De poll is niet actief.')
-            voter_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+            poll = await conn.fetchrow('SELECT id, active FROM polls ORDER BY id LIMIT 1')
+            valid_option = await conn.fetchval('SELECT 1 FROM poll_options WHERE id=$1 AND poll_id=$2', payload.option_id, poll['id'] if poll else 0)
+            if not poll or not poll['active'] or not valid_option:
+                raise HTTPException(status_code=400, detail='De poll is niet actief of deze optie bestaat niet.')
             try:
-                await conn.execute('INSERT INTO poll_votes(game_preset, voter_hash) VALUES($1, $2)', payload.game_preset, voter_hash)
+                await conn.execute('INSERT INTO poll_votes(poll_id, option_id, voter_hash) VALUES($1, $2, $3)', poll['id'], payload.option_id, hashlib.sha256(token.encode()).hexdigest())
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail='Je hebt al gestemd.')
-            return {'success': True, 'message': 'Stem ontvangen.'}
     finally:
         await pool.close()
+    return {'success': True, 'message': 'Stem ontvangen.'}
 
 
+@router.get('/admin/poll/results')
 @router.get('/poll/results')
 async def poll_results(request: Request):
     await admin_check(request)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            rows = await conn.fetch('SELECT game_preset, count(*)::int AS count FROM poll_votes GROUP BY game_preset ORDER BY count DESC')
-            return {'results': [dict(row) for row in rows], 'total': sum(row['count'] for row in rows)}
+            return await poll_payload(conn, include_results=True)
     finally:
         await pool.close()
 
 
-@router.post('/poll/reset')
-async def reset_poll(request: Request):
+@router.get('/admin/players')
+@router.get('/players')
+async def list_players(request: Request):
     await admin_check(request)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            await conn.execute('TRUNCATE poll_votes')
-        return {'success': True, 'message': 'Stemmen gereset.'}
+            rows = await conn.fetch('SELECT id, name, email, status, game_preset, created_at FROM players ORDER BY created_at ASC')
+            return {'players': [dict(row) for row in rows]}
     finally:
         await pool.close()
 
@@ -175,50 +272,92 @@ async def players_count(request: Request):
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow('SELECT count(*)::int as c FROM players')
-        return {'count': row['c'] if row else 0}
+            return {'count': await conn.fetchval('SELECT count(*)::int FROM players')}
     finally:
         await pool.close()
 
 
-@router.get('/players')
-async def list_players(request: Request):
+def simulate_game(preset_id: str, count: int = 7) -> list[dict[str, Any]]:
+    game = config_for(preset_id)
+    roles = game['roles']
+    rng = random.Random(f'secret-game:{preset_id}:{count}')
+    shuffled = roles.copy()
+    rng.shuffle(shuffled)
+    return [{'id': index + 1, 'name': f'Test Speler {index + 1}', 'email': f'test-speler-{index + 1}@example.com', 'role': shuffled[index % len(shuffled)]} for index in range(count)]
+
+
+@router.get('/admin/test')
+async def test_info(request: Request):
     await admin_check(request)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            rows = await conn.fetch('SELECT id, name, email, role, target, status, game_preset FROM players ORDER BY created_at ASC')
-        return {'players': [dict(row) for row in rows]}
+            state = await state_row(conn)
+            return {'game': public_config(config_for(state['game_preset'])), 'players': simulate_game(state['game_preset'])}
     finally:
         await pool.close()
 
 
-@router.post('/draw')
-async def draw(request: Request):
+@router.post('/admin/test/simulate')
+async def simulate(request: Request):
     await admin_check(request)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            rows = await conn.fetch('SELECT id, name, email FROM players ORDER BY created_at ASC')
-            if not rows:
-                raise HTTPException(status_code=400, detail='Geen deelnemers')
+            state = await state_row(conn)
+            return {'game': config_for(state['game_preset']), 'players': simulate_game(state['game_preset'])}
+    finally:
+        await pool.close()
 
-            chosen = secrets.choice(rows)
-            role_name = 'Geheime speler'
-            secret_text = 'Je bent succesvol ingeschreven voor dit geheim spel. Houd deze informatie geheim.'
+
+@router.get('/admin/test/emails')
+async def test_emails(request: Request):
+    await admin_check(request)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            state = await state_row(conn)
+            game = config_for(state['game_preset'])
+            return {'emails': [build_secret_email(player_name=player['name'], to_email=player['email'], game=game, role=player['role']) for player in simulate_game(state['game_preset'])]}
+    finally:
+        await pool.close()
+
+
+@router.post('/admin/start-game')
+async def start_game(request: Request):
+    await admin_check(request)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            state = await state_row(conn)
+            game = config_for(state['game_preset'])
+            players = await conn.fetch('SELECT id, name, email FROM players ORDER BY created_at ASC')
+            if not players:
+                raise HTTPException(status_code=400, detail='Voeg eerst deelnemers toe voordat je het spel start.')
+            assignments = simulate_game(state['game_preset'], len(players))
+            for player, assignment in zip(players, assignments):
+                role = assignment['role']
+                await conn.execute('UPDATE players SET role=$1, personal_info=$2, clues=$3, status=$4, updated_at=now() WHERE id=$5', role['name'], role['personal_info'], json.dumps(role['clues']), 'assigned', player['id'])
+            await conn.execute("UPDATE game_state SET status='started', registration_open=FALSE, updated_at=now() WHERE id=$1", state['id'])
+            assigned = await conn.fetch('SELECT id, name, email, role FROM players ORDER BY id')
+        email_errors = []
+        for player in assigned:
+            role = next(role for role in game['roles'] if role['name'] == player['role'])
             try:
-                await send_secret_email(
-                    chosen['email'],
-                    player_name=chosen['name'],
-                    role_name=role_name,
-                    game_name=settings.app_name,
-                    secret_info=secret_text,
-                )
-            except Exception as exc:  # pragma: no cover
-                raise HTTPException(status_code=500, detail=f'Fout bij verzenden email: {str(exc)}') from exc
+                await send_secret_email(player['email'], player_name=player['name'], game=game, role=role)
+            except Exception as exc:
+                logger.exception('Secret email failed for player %s', player['id'])
+                email_errors.append(str(exc))
+        return {'success': True, 'state': await get_state_after_start(), 'email_errors': email_errors}
+    finally:
+        await pool.close()
 
-            await conn.execute('UPDATE players SET role=$1, updated_at=now() WHERE id=$2', role_name, chosen['id'])
-        return {'success': True, 'message': 'De geheime speler is geïnformeerd.'}
+
+async def get_state_after_start():
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            return await state_row(conn)
     finally:
         await pool.close()
 
@@ -230,7 +369,7 @@ async def reset(request: Request):
     try:
         async with pool.acquire() as conn:
             await conn.execute('TRUNCATE players')
+            await conn.execute("UPDATE game_state SET status='draft', registration_open=TRUE, updated_at=now()")
         return {'success': True, 'message': 'Alle deelnemers verwijderd.'}
     finally:
         await pool.close()
-

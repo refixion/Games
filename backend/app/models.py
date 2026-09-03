@@ -1,10 +1,4 @@
--- SQL schema voor players tabel
+"""Database schema reference.
 
-CREATE TABLE IF NOT EXISTS players (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
--- Gebruik dit SQL om handmatig te creëren als dat nodig is.
+The live schema is created and upgraded by ``app.database.init_db``.
+"""

@@ -2,11 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-:root{
-  --primary: #0ea5a4;
-}
-
-body{ background: #0b0f14 }
+:root { font-family: Georgia, 'Times New Roman', serif; color: #e2e8f0; background: #10151b; }
+body { margin: 0; background: radial-gradient(circle at top right, #26323b 0, #10151b 45%, #0b0f14 100%); min-height: 100vh; }
+button, input, textarea { font: inherit; }
+.field { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,255,255,.14); background: rgba(5,10,15,.65); padding: .8rem 1rem; color: #fff; outline: none; }
+.field:focus { border-color: #fbbf24; }
+.panel { border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.035); padding: 1.25rem; }
+.panel-title { margin: 0; font-size: 1.35rem; font-weight: 700; color: #fff; }
+.muted { color: #94a3b8; font-size: .9rem; }
+.metric { display: block; margin-top: .45rem; font-size: 1.6rem; color: #fff; }
+.section-title { margin: 2rem 0 .75rem; font-size: 1.4rem; font-weight: 700; color: #fff; }
 
 .backdrop-blur-sm{ backdrop-filter: blur(6px) }
 

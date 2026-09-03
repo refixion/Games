@@ -1,7 +1,7 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 class JoinIn(BaseModel):
-    name: str
+    name: str = Field(min_length=2, max_length=100)
     email: EmailStr
 
 class GenericResponse(BaseModel):
@@ -22,5 +22,10 @@ class ToggleIn(BaseModel):
 
 
 class VoteIn(BaseModel):
-    game_preset: str
+    option_id: int
+
+
+class PollIn(BaseModel):
+    question: str = Field(min_length=3, max_length=240)
+    options: list[str] = Field(min_length=2, max_length=8)
 

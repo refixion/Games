@@ -1,34 +1,13 @@
-import React from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CONFIG, GAME_PRESETS } from '../config'
+import { API_BASE_URL, GamePreset } from '../config'
 
+type StateResponse = { state: { registration_open: boolean }; game: GamePreset; poll: { active: boolean; question: string; options: { id: number; label: string }[] } }
 export default function Home() {
-  return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-2xl shadow-slate-950/40 sm:p-8">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.28em] text-violet-300">Mysterieuze AVONTUREN</p>
-        <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">{CONFIG.game_name}</h1>
-        <p className="mt-4 max-w-2xl text-lg text-slate-300">{CONFIG.description}</p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link to="/join" className="rounded-full bg-violet-500 px-5 py-3 font-semibold text-white transition hover:bg-violet-400">Meedoen</Link>
-          <Link to="/admin" className="rounded-full border border-white/15 bg-white/5 px-5 py-3 font-semibold text-slate-200 transition hover:bg-white/10">Admin</Link>
-        </div>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-3">
-        {GAME_PRESETS.map((preset) => (
-          <div key={preset.id} className="rounded-2xl border border-white/10 bg-slate-900/80 p-5">
-            <div className="mb-3 h-2 w-20 rounded-full" style={{ background: preset.theme.primary }} />
-            <h2 className="text-xl font-bold text-white">{preset.label}</h2>
-            <p className="mt-2 text-sm text-slate-300">Speltype: {preset.type}</p>
-            <ul className="mt-4 space-y-2 text-sm text-slate-400">
-              {preset.roles.map((role) => (
-                <li key={role}>• {role}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </section>
-    </div>
-  )
+  const [data, setData] = useState<StateResponse | null>(null); const [selected, setSelected] = useState<number>(); const [message, setMessage] = useState('')
+  useEffect(() => { fetch(`${API_BASE_URL}/game-state`).then((r) => r.json()).then(setData).catch(() => setMessage('De spelstatus kan momenteel niet worden geladen.')) }, [])
+  async function vote() { if (!selected) return; const token = localStorage.getItem('vote_token') || crypto.randomUUID(); localStorage.setItem('vote_token', token); const r = await fetch(`${API_BASE_URL}/poll/vote`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vote-Token': token }, body: JSON.stringify({ option_id: selected }) }); const result = await r.json().catch(() => ({})); setMessage(result.detail || result.message || 'Stem ontvangen.') }
+  if (!data) return <p className="py-20 text-center text-slate-400">Spelstatus laden…</p>
+  if (!data.state.registration_open) return <section className="mx-auto max-w-2xl py-20 text-center"><p className="text-sm uppercase tracking-[0.25em] text-amber-400">{data.game.name}</p><h1 className="mt-4 text-5xl font-black text-white">Het spel is begonnen</h1><p className="mt-5 text-lg text-slate-300">Check je ingevoerde mail voor meer instructies.</p><Link to="/game" className="mt-8 inline-block border-b border-amber-400 pb-1 text-amber-300">Bekijk de speluitleg</Link></section>
+  return <div className="space-y-10"><section className="grid gap-8 border-b border-white/10 pb-12 md:grid-cols-[1.2fr_.8fr] md:items-end"><div><p className="text-sm uppercase tracking-[0.25em] text-amber-400">Secret Game / live setup</p><h1 className="mt-4 text-5xl font-black leading-none text-white sm:text-7xl">Kies je<br /><span className="text-amber-300">kant.</span></h1><p className="mt-6 max-w-xl text-lg text-slate-300">{data.game.description}</p><div className="mt-7 flex gap-3"><Link to="/join" className="bg-amber-400 px-5 py-3 font-bold text-slate-950 hover:bg-amber-300">Meedoen</Link><Link to="/game" className="border border-white/20 px-5 py-3 font-semibold text-white hover:border-amber-300">Over {data.game.name}</Link></div></div><div className="border-l-2 border-amber-400 pl-6"><p className="text-sm text-slate-400">Actieve game</p><p className="mt-2 text-3xl font-bold text-white">{data.game.name}</p><p className="mt-2 text-slate-400">{data.game.type}</p></div></section>{data.poll.active && <section className="max-w-2xl border border-emerald-400/30 bg-emerald-400/5 p-6"><p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Anonieme poll</p><h2 className="mt-2 text-2xl font-bold text-white">{data.poll.question}</h2><div className="mt-5 grid gap-2">{data.poll.options.map((option) => <label key={option.id} className="flex cursor-pointer items-center gap-3 border border-white/10 p-3 text-slate-200 hover:border-emerald-300"><input type="radio" name="poll" onChange={() => setSelected(option.id)} />{option.label}</label>)}</div><button onClick={vote} disabled={!selected} className="mt-5 bg-emerald-400 px-5 py-3 font-bold text-slate-950 disabled:opacity-40">Stem</button>{message && <p className="mt-3 text-sm text-emerald-300">{message}</p>}</section>}<section><p className="text-sm uppercase tracking-[0.2em] text-slate-500">Jouw briefing</p><h2 className="mt-2 text-3xl font-bold text-white">{data.game.goal}</h2><div className="mt-5 grid gap-3 sm:grid-cols-3">{data.game.roles.map((role) => <div key={role.name} className="border border-white/10 bg-white/[0.03] p-5"><p className="font-bold text-amber-300">{role.name}</p><p className="mt-2 text-sm text-slate-400">{role.description}</p></div>)}</div></section></div>
 }

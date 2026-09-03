@@ -3,6 +3,8 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import Home from './pages/Home'
 import Join from './pages/Join'
 import Admin from './pages/Admin'
+import Game from './pages/Game'
+import Test from './pages/Test'
 import './styles/index.css'
 
 export default function App() {
@@ -27,6 +29,8 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/join" element={<Join />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/game" element={<Game />} />
+            <Route path="/admin/test" element={<Test />} />
           </Routes>
         </main>
       </div>

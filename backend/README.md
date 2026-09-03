@@ -10,6 +10,4 @@ Start:
 
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-Configureer DATABASE_URL en RESEND_API_KEY in je omgevingsvariabelen of .env
-
-Maak de tabel aan met het SQL in app/models.py als eerste stap.
+Configureer `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` en `ADMIN_PASSWORD` in je omgevingsvariabelen of `.env`. PostgreSQL-tabellen en gameconfiguraties worden automatisch aangemaakt tijdens FastAPI startup.
