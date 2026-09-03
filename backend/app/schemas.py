@@ -29,3 +29,9 @@ class PollIn(BaseModel):
     question: str = Field(min_length=3, max_length=240)
     options: list[str] = Field(min_length=2, max_length=8)
 
+
+class GenerateIn(BaseModel):
+    player_count: int = Field(default=7, ge=2, le=30)
+    difficulty: str = Field(default='medium', min_length=3, max_length=20)
+    clue_count: int = Field(default=3, ge=2, le=8)
+

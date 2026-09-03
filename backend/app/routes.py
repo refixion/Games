@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-import random
+import uuid
 from typing import Any
 
 import asyncpg
@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .database import get_pool
 from .email import build_secret_email, send_secret_email
-from .schemas import GameSelectIn, JoinIn, PollIn, StatusIn, ToggleIn, VoteIn
+from .ai_service import AIProviderUnavailable, GeneratedGame, ai_service
+from .schemas import GenerateIn, GameSelectIn, JoinIn, PollIn, StatusIn, ToggleIn, VoteIn
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api')
@@ -277,13 +278,34 @@ async def players_count(request: Request):
         await pool.close()
 
 
-def simulate_game(preset_id: str, count: int = 7) -> list[dict[str, Any]]:
-    game = config_for(preset_id)
-    roles = game['roles']
-    rng = random.Random(f'secret-game:{preset_id}:{count}')
-    shuffled = roles.copy()
-    rng.shuffle(shuffled)
-    return [{'id': index + 1, 'name': f'Test Speler {index + 1}', 'email': f'test-speler-{index + 1}@example.com', 'role': shuffled[index % len(shuffled)]} for index in range(count)]
+def generated_player_payload(player: dict[str, Any], generated: dict[str, Any]) -> dict[str, Any]:
+    return {'id': player['player_id'], 'name': player['name'], 'email': player['email'], 'role': player['role'], 'role_description': player['role_description'], 'secret_information': player['secret_information'], 'clues': player['clues'], 'relationships': player.get('relationships', []), 'instructions': player['instructions']}
+
+
+def email_role(player: dict[str, Any]) -> dict[str, Any]:
+    return {'name': player['role'], 'description': player['role_description'], 'personal_info': player['secret_information'], 'clues': player['clues'], 'instructions': player['instructions']}
+
+
+async def generate_and_store(conn, game: dict[str, Any], names: list[str], mode: str, request: GenerateIn) -> tuple[str, GeneratedGame, list[dict[str, Any]]]:
+    try:
+        generated = await ai_service.generate_game(game=game, names=names, difficulty=request.difficulty, clue_count=request.clue_count)
+    except AIProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if len(generated.players) != len(names):
+        raise HTTPException(status_code=502, detail='AI_GAME_GENERATION_FAILED: de AI leverde niet voor iedere speler speldata.')
+    generation_id = uuid.uuid4()
+    payload = generated.model_dump() if hasattr(generated, 'model_dump') else generated.dict()
+    await conn.execute('INSERT INTO generated_games(id, game_preset, mode, payload) VALUES($1, $2, $3, $4)', generation_id, game['id'], mode, json.dumps(payload))
+    output = []
+    for index, generated_player in enumerate(generated.players):
+        player = generated_player.model_dump() if hasattr(generated_player, 'model_dump') else generated_player.dict()
+        player['name'] = names[index]
+        player['email'] = f'test-speler-{index + 1}@example.com' if mode == 'test' else ''
+        await conn.execute('INSERT INTO generated_player_data(generated_game_id, player_id, payload) VALUES($1, $2, $3)', generation_id, player['player_id'], json.dumps(player))
+        output.append(player)
+    return str(generation_id), generated, output
 
 
 @router.get('/admin/test')
@@ -293,19 +315,26 @@ async def test_info(request: Request):
     try:
         async with pool.acquire() as conn:
             state = await state_row(conn)
-            return {'game': public_config(config_for(state['game_preset'])), 'players': simulate_game(state['game_preset'])}
+            row = await conn.fetchrow('SELECT payload FROM generated_games WHERE mode=$1 ORDER BY created_at DESC LIMIT 1', 'test')
+            generated = row['payload'] if row else None
+            if generated:
+                generated['players'] = [item['payload'] for item in await conn.fetch('SELECT payload FROM generated_player_data WHERE generated_game_id=(SELECT id FROM generated_games WHERE mode=$1 ORDER BY created_at DESC LIMIT 1) ORDER BY id', 'test')]
+            return {'game': public_config(config_for(state['game_preset'])), 'generated_game': generated}
     finally:
         await pool.close()
 
 
 @router.post('/admin/test/simulate')
-async def simulate(request: Request):
+async def simulate(payload: GenerateIn, request: Request):
     await admin_check(request)
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             state = await state_row(conn)
-            return {'game': config_for(state['game_preset']), 'players': simulate_game(state['game_preset'])}
+            game = config_for(state['game_preset'])
+            names = [f'Test Speler {index}' for index in range(1, payload.player_count + 1)]
+            generation_id, generated, players = await generate_and_store(conn, game, names, 'test', payload)
+            return {'generation_id': generation_id, 'game': generated.model_dump() if hasattr(generated, 'model_dump') else generated.dict(), 'players': players}
     finally:
         await pool.close()
 
@@ -316,9 +345,14 @@ async def test_emails(request: Request):
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            state = await state_row(conn)
-            game = config_for(state['game_preset'])
-            return {'emails': [build_secret_email(player_name=player['name'], to_email=player['email'], game=game, role=player['role']) for player in simulate_game(state['game_preset'])]}
+            row = await conn.fetchrow('SELECT id, game_preset, payload FROM generated_games WHERE mode=$1 ORDER BY created_at DESC LIMIT 1', 'test')
+            if not row:
+                raise HTTPException(status_code=400, detail='Genereer eerst een testspel.')
+            generated = row['payload']
+            game = config_for(row['game_preset'])
+            players = [item['payload'] for item in await conn.fetch('SELECT payload FROM generated_player_data WHERE generated_game_id=$1 ORDER BY id', row['id'])]
+            emails = [build_secret_email(player_name=player.get('name', f'Test Speler {index + 1}'), to_email=player.get('email', f'test-speler-{index + 1}@example.com'), game={'name': generated['game']}, role=email_role(player)) for index, player in enumerate(players)]
+            return {'emails': emails, 'generation_id': str(row['id'])}
     finally:
         await pool.close()
 
@@ -334,17 +368,16 @@ async def start_game(request: Request):
             players = await conn.fetch('SELECT id, name, email FROM players ORDER BY created_at ASC')
             if not players:
                 raise HTTPException(status_code=400, detail='Voeg eerst deelnemers toe voordat je het spel start.')
-            assignments = simulate_game(state['game_preset'], len(players))
+            generation_request = GenerateIn(player_count=len(players))
+            _, generated, assignments = await generate_and_store(conn, game, [player['name'] for player in players], 'live', generation_request)
             for player, assignment in zip(players, assignments):
-                role = assignment['role']
-                await conn.execute('UPDATE players SET role=$1, personal_info=$2, clues=$3, status=$4, updated_at=now() WHERE id=$5', role['name'], role['personal_info'], json.dumps(role['clues']), 'assigned', player['id'])
+                await conn.execute('UPDATE players SET role=$1, personal_info=$2, secret_info=$3, clues=$4, status=$5, updated_at=now() WHERE id=$6', assignment['role'], assignment['role_description'], assignment['secret_information'], json.dumps(assignment['clues']), 'assigned', player['id'])
             await conn.execute("UPDATE game_state SET status='started', registration_open=FALSE, updated_at=now() WHERE id=$1", state['id'])
             assigned = await conn.fetch('SELECT id, name, email, role FROM players ORDER BY id')
         email_errors = []
-        for player in assigned:
-            role = next(role for role in game['roles'] if role['name'] == player['role'])
+        for player, assignment in zip(assigned, assignments):
             try:
-                await send_secret_email(player['email'], player_name=player['name'], game=game, role=role)
+                await send_secret_email(player['email'], player_name=player['name'], game={'name': generated.game}, role=email_role(assignment))
             except Exception as exc:
                 logger.exception('Secret email failed for player %s', player['id'])
                 email_errors.append(str(exc))

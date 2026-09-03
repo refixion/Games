@@ -63,6 +63,20 @@ async def init_db():
                     config JSONB NOT NULL,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
                 );
+                CREATE TABLE IF NOT EXISTS generated_games (
+                    id UUID PRIMARY KEY,
+                    game_preset TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS generated_player_data (
+                    id SERIAL PRIMARY KEY,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    player_id TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    UNIQUE (generated_game_id, player_id)
+                );
                 CREATE TABLE IF NOT EXISTS polls (
                     id SERIAL PRIMARY KEY,
                     question TEXT NOT NULL,
