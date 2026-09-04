@@ -351,8 +351,7 @@ async def test_emails(request: Request):
             generated = row['payload']
             game = config_for(row['game_preset'])
             players = [item['payload'] for item in await conn.fetch('SELECT payload FROM generated_player_data WHERE generated_game_id=$1 ORDER BY id', row['id'])]
-            emails = [build_secret_email(player_name=player.get('name', f'Test Speler {index + 1}'), to_email=player.get('email', f'test-speler-{index + 1}@example.com'), game={'name': generated['game']}, role=email_role(player)) for index, player in enumerate(players)]
-            return {'emails': emails, 'generation_id': str(row['id'])}
+            emails = [build_secret_email(player_name=player.get('name', f'Test Speler {index + 1}'), to_email=player.get('email', f'test-speler-{index + 1}@example.com'), game={'name': generated['game_name']}, role=email_role(player)) for index, player in enumerate(players)]            return {'emails': emails, 'generation_id': str(row['id'])}
     finally:
         await pool.close()
 
@@ -377,7 +376,7 @@ async def start_game(request: Request):
         email_errors = []
         for player, assignment in zip(assigned, assignments):
             try:
-                await send_secret_email(player['email'], player_name=player['name'], game={'name': generated.game}, role=email_role(assignment))
+                await send_secret_email(player['email'], player_name=player['name'], game={'name': generated.game_name}, role=email_role(assignment))
             except Exception as exc:
                 logger.exception('Secret email failed for player %s', player['id'])
                 email_errors.append(str(exc))

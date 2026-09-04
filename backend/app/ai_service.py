@@ -35,7 +35,13 @@ class GeneratedGame(BaseModel):
     class Config:
         extra = 'forbid'
 
-    game: str
+    game_id: Literal[
+    'murder_mystery',
+    'the_heist',
+    'the_investigation'
+    ]
+
+    game_name: str
     title: str
     story: str
     objective: str
@@ -50,12 +56,20 @@ class AIService:
         if not settings.ai_api_key:
             raise AIProviderUnavailable('AI_PROVIDER_NOT_CONFIGURED: configureer AI_API_KEY voor echte gamegeneratie.')
         prompt = {
-            'game': game['name'], 'game_rules': game['rules'], 'available_roles': [role['name'] for role in game['roles']],
+            'game_id': game['id'],
+            'game_name': game['name'],
+            'game_rules': game['rules'],
+            'available_roles': [role['name'] for role in game['roles']],
             'players': [{'player_id': str(index + 1), 'name': name} for index, name in enumerate(names)],
-            'theme': game.get('theme', {}), 'objective': game['goal'], 'difficulty': difficulty, 'clue_count': clue_count,
+            'theme': game.get('theme', {}),
+            'objective': game['goal'],
+            'difficulty': difficulty,
+            'clue_count': clue_count,
             'requirements': [
                 'Return ONLY the requested structured game object.',
-                'The output MUST contain game, title, story, objective, rules, difficulty, solution, and players.',
+                'The output MUST contain game_id, game_name, title, story, objective, rules, difficulty, solution, and players.',
+                'game_id is an immutable canonical identifier. Return exactly the provided game_id. Never translate, capitalize, rename, or modify it.',
+                'game_name must be the provided human-readable game name.',
                 'difficulty MUST be exactly easy, medium, or hard.',
                 'solution is the secret canonical solution and must never be shown to normal players.',
                 'Every player MUST contain player_id, name, role, role_description, objective, secret_information, clues, relationships, and instructions.',
@@ -68,10 +82,56 @@ class AIService:
         body = {
             'model': settings.ai_model,
             'temperature': 0.2,
-            'messages': [
-                {'role': 'system', 'content': 'You are a professional tabletop game designer. Return ONLY the requested structured game object. The generated game MUST contain game, title, story, objective, rules, difficulty, solution, and players. solution and difficulty are mandatory. difficulty must be exactly easy, medium, or hard. solution is the secret canonical solution and must never be shown to normal players.'},
-                {'role': 'user', 'content': json.dumps({'request': prompt, 'output_requirements': {'required_fields': ['game', 'title', 'story', 'objective', 'rules', 'difficulty', 'solution', 'players'], 'player_required_fields': ['player_id', 'name', 'role', 'role_description', 'objective', 'secret_information', 'clues', 'relationships', 'instructions'], 'difficulty': ['easy', 'medium', 'hard']}}, ensure_ascii=False)},
-            ],
+        'messages': [
+            {
+                'role': 'system',
+                'content': (
+                    'You are a professional tabletop game designer. '
+                    'Return ONLY the requested structured game object. '
+                    'The generated game MUST contain game_id, game_name, title, story, '
+                    'objective, rules, difficulty, solution, and players. '
+                    'game_id is an immutable canonical identifier and MUST exactly match '
+                    'the provided game_id. Never translate, capitalize, rename, or modify it. '
+                    'solution and difficulty are mandatory. '
+                    'difficulty must be exactly easy, medium, or hard. '
+                    'solution is the secret canonical solution and must never be shown to normal players.'
+                )
+            },
+            {
+                'role': 'user',
+                'content': json.dumps(
+                    {
+                        'request': prompt,
+                        'output_requirements': {
+                            'required_fields': [
+                                'game_id',
+                                'game_name',
+                                'title',
+                                'story',
+                                'objective',
+                                'rules',
+                                'difficulty',
+                                'solution',
+                                'players'
+                            ],
+                            'player_required_fields': [
+                                'player_id',
+                                'name',
+                                'role',
+                                'role_description',
+                                'objective',
+                                'secret_information',
+                                'clues',
+                                'relationships',
+                                'instructions'
+                            ],
+                            'difficulty': ['easy', 'medium', 'hard']
+                        }
+                    },
+                    ensure_ascii=False
+                )
+            },
+        ],
             'response_format': {'type': 'json_schema', 'json_schema': {'name': 'generated_game', 'strict': True, 'schema': schema}},
         }
         headers = {'Authorization': f'Bearer {settings.ai_api_key}', 'Content-Type': 'application/json'}
@@ -120,8 +180,10 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_generation(generated: GeneratedGame, game: dict[str, Any], names: list[str], clue_count: int, requested_difficulty: str) -> None:
-    if generated.game != game['id']:
-        raise ValueError(f'generated game does not match selected game: {generated.game}')
+    if generated.game_id != game['id']:
+        raise ValueError(
+            f'generated game does not match selected game: {generated.game_id}'
+        )
     if len(generated.players) != len(names):
         raise ValueError(f'expected {len(names)} players, received {len(generated.players)}')
     if not generated.solution.strip() or not generated.difficulty:
