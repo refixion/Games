@@ -290,11 +290,11 @@ async def generate_and_store(conn, game: dict[str, Any], names: list[str], mode:
     try:
         generated = await ai_service.generate_game(game=game, names=names, difficulty=request.difficulty, clue_count=request.clue_count)
     except AIProviderUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail={'code': exc.code, 'message': str(exc)}) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail={'code': 'AI_GAME_GENERATION_FAILED', 'message': str(exc)}) from exc
     if len(generated.players) != len(names):
-        raise HTTPException(status_code=502, detail='AI_GAME_GENERATION_FAILED: de AI leverde niet voor iedere speler speldata.')
+        raise HTTPException(status_code=502, detail={'code': 'AI_GAME_GENERATION_FAILED', 'message': 'De AI leverde niet voor iedere speler speldata.'})
     generation_id = uuid.uuid4()
     payload = generated.model_dump() if hasattr(generated, 'model_dump') else generated.dict()
     await conn.execute('INSERT INTO generated_games(id, game_preset, mode, payload) VALUES($1, $2, $3, $4)', generation_id, game['id'], mode, json.dumps(payload))

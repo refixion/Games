@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     frontend_url: str = 'http://localhost:5173'
     app_name: str = 'Secret Game'
     ai_api_key: str = ''
-    ai_base_url: str = 'https://api.openai.com/v1'
-    ai_model: str = 'gpt-4o-mini'
+    ai_base_url: str = 'https://api.groq.com/openai/v1'
+    ai_model: str = 'openai/gpt-oss-20b'
 
     class Config:
         env_file = '.env'
