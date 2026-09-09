@@ -10,10 +10,13 @@ def build_secret_email(*, player_name: str, to_email: str, game: dict, role: dic
   clues = role.get('clues', [])
   personal_info = role.get('personal_info', '')
   instructions = role.get('instructions', 'Houd deze informatie geheim tot het spel begint.')
+  objective = role.get('objective', '')
+  player_token = role.get('player_token', '')
   safe = lambda value: html.escape(str(value))
   clue_html = ''.join(f'<li>{safe(clue)}</li>' for clue in clues)
-  text = f"{greeting}\n\nGame: {game['name']}\nRol: {role['name']}\n\n{role['description']}\n\nPersoonlijke informatie: {personal_info}\n\nClues:\n" + '\n'.join(f'- {clue}' for clue in clues) + f"\n\n{instructions}"
-  html_body = f'''<html><body style="font-family:Arial,sans-serif;color:#17202a;background:#f5f2ea;padding:24px"><div style="max-width:640px;margin:auto;background:#fffdf8;border:1px solid #d7d0c2;padding:32px"><p style="color:#b45309;text-transform:uppercase;letter-spacing:.12em;font-size:12px">{safe(game['name'])}</p><h1>Jouw geheime rol</h1><p>{safe(greeting)}</p><h2>{safe(role['name'])}</h2><p>{safe(role['description'])}</p><p><strong>Persoonlijke informatie</strong><br>{safe(personal_info)}</p><p><strong>Clues</strong></p><ul>{clue_html}</ul><p>{safe(instructions)}</p></div></body></html>'''
+  text = f"{greeting}\n\nGame: {game['name']}\nRol: {role['name']}\n\n{role['description']}\n\nPersoonlijke informatie: {personal_info}\n\nPersoonlijk doel: {objective}\n\nClues:\n" + '\n'.join(f'- {clue}' for clue in clues) + f"\n\n{instructions}"
+  link = f'<p><a href="/play?token={safe(player_token)}">Open jouw geheime spelpagina</a></p>' if player_token else ''
+  html_body = f'''<html><body style="font-family:Arial,sans-serif;color:#17202a;background:#f5f2ea;padding:24px"><div style="max-width:640px;margin:auto;background:#fffdf8;border:1px solid #d7d0c2;padding:32px"><p style="color:#b45309;text-transform:uppercase;letter-spacing:.12em;font-size:12px">{safe(game['name'])}</p><h1>Jouw geheime rol</h1><p>{safe(greeting)}</p><h2>{safe(role['name'])}</h2><p>{safe(role['description'])}</p><p><strong>Persoonlijke informatie</strong><br>{safe(personal_info)}</p><p><strong>Persoonlijk doel</strong><br>{safe(objective)}</p><p><strong>Clues</strong></p><ul>{clue_html}</ul><p>{safe(instructions)}</p>{link}</div></body></html>'''
   return {'to': to_email, 'subject': 'Jouw geheime rol — Secret Game', 'text': text, 'html': html_body}
 
 

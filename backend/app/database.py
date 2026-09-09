@@ -42,6 +42,7 @@ async def init_db():
             await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_preset TEXT DEFAULT 'murder_mystery'")
             await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'registered'")
             await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()")
+            await conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS access_token TEXT")
             await conn.execute(
                 '''
                 CREATE TABLE IF NOT EXISTS game_state (
@@ -50,6 +51,8 @@ async def init_db():
                     game_preset TEXT DEFAULT 'murder_mystery',
                     registration_open BOOLEAN DEFAULT TRUE,
                     voting_active BOOLEAN DEFAULT FALSE,
+                    duration TEXT DEFAULT 'avond',
+                    active_generation_id UUID,
                     status TEXT DEFAULT 'draft',
                     theme JSONB DEFAULT '{}'::jsonb,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
@@ -67,6 +70,8 @@ async def init_db():
                     id UUID PRIMARY KEY,
                     game_preset TEXT NOT NULL,
                     mode TEXT NOT NULL,
+                    difficulty TEXT DEFAULT 'medium',
+                    duration TEXT DEFAULT 'avond',
                     payload JSONB NOT NULL,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
                 );
@@ -76,6 +81,58 @@ async def init_db():
                     player_id TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     UNIQUE (generated_game_id, player_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_phases (
+                    id SERIAL PRIMARY KEY,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    phase_number INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    open_question TEXT NOT NULL,
+                    release_after_days INTEGER NOT NULL DEFAULT 0,
+                    objectives JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    UNIQUE (generated_game_id, phase_number)
+                );
+                CREATE TABLE IF NOT EXISTS game_events (
+                    id TEXT NOT NULL,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    phase_number INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    delivery TEXT NOT NULL,
+                    release_after_days INTEGER NOT NULL DEFAULT 0,
+                    player_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    released_at TIMESTAMP WITH TIME ZONE,
+                    PRIMARY KEY (generated_game_id, id)
+                );
+                CREATE TABLE IF NOT EXISTS voting_moments (
+                    id TEXT NOT NULL,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    phase_number INTEGER NOT NULL,
+                    question TEXT NOT NULL,
+                    release_after_days INTEGER NOT NULL DEFAULT 0,
+                    duration_hours INTEGER NOT NULL,
+                    opened_at TIMESTAMP WITH TIME ZONE,
+                    closed_at TIMESTAMP WITH TIME ZONE,
+                    PRIMARY KEY (generated_game_id, id)
+                );
+                CREATE TABLE IF NOT EXISTS suspicion_votes (
+                    id SERIAL PRIMARY KEY,
+                    voting_moment_id TEXT NOT NULL,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    voter_player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                    candidate_player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                    UNIQUE (generated_game_id, voting_moment_id, voter_player_id)
+                );
+                CREATE TABLE IF NOT EXISTS objective_status (
+                    id SERIAL PRIMARY KEY,
+                    generated_game_id UUID NOT NULL REFERENCES generated_games(id) ON DELETE CASCADE,
+                    player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                    objective_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    evaluated_at TIMESTAMP WITH TIME ZONE,
+                    UNIQUE (generated_game_id, player_id, objective_id)
                 );
                 CREATE TABLE IF NOT EXISTS polls (
                     id SERIAL PRIMARY KEY,
@@ -117,6 +174,8 @@ async def init_db():
                 [(preset_id, json.dumps(config)) for preset_id, config in GAME_CONFIGS.items()],
             )
             await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS voting_active BOOLEAN DEFAULT FALSE")
+            await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT 'avond'")
+            await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS active_generation_id UUID")
             poll_id = await conn.fetchval('SELECT id FROM polls ORDER BY id LIMIT 1')
             if poll_id is None:
                 poll_id = await conn.fetchval("INSERT INTO polls(question, active) VALUES($1, FALSE) RETURNING id", 'Welke game spreekt je het meest aan?')

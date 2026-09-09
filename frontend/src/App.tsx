@@ -5,6 +5,8 @@ import Join from './pages/Join'
 import Admin from './pages/Admin'
 import Game from './pages/Game'
 import Test from './pages/Test'
+import PlayerGame from './pages/PlayerGame'
+import AdminDuration from './pages/AdminDuration'
 import './styles/index.css'
 
 export default function App() {
@@ -20,6 +22,7 @@ export default function App() {
               <Link to="/" className="transition hover:text-white">Home</Link>
               <Link to="/join" className="transition hover:text-white">Meedoen</Link>
               <Link to="/admin" className="transition hover:text-white">Admin</Link>
+              <Link to="/admin/duration" className="transition hover:text-white">Speelduur</Link>
             </nav>
           </div>
         </header>
@@ -30,7 +33,9 @@ export default function App() {
             <Route path="/join" element={<Join />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/game" element={<Game />} />
+            <Route path="/play" element={<PlayerGame />} />
             <Route path="/admin/test" element={<Test />} />
+            <Route path="/admin/duration" element={<AdminDuration />} />
           </Routes>
         </main>
       </div>
