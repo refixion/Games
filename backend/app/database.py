@@ -156,6 +156,10 @@ async def init_db():
                 );
                 '''
             )
+            # CREATE TABLE IF NOT EXISTS does not add columns to databases that
+            # were initialized before generation difficulty/duration were added.
+            await conn.execute("ALTER TABLE generated_games ADD COLUMN IF NOT EXISTS difficulty TEXT DEFAULT 'medium'")
+            await conn.execute("ALTER TABLE generated_games ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT 'avond'")
             row = await conn.fetchrow('SELECT 1 FROM game_state LIMIT 1')
             if row is None:
                 await conn.execute(

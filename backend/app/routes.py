@@ -477,17 +477,22 @@ async def generate_and_store(conn, game: dict[str, Any], names: list[str], mode:
         raise HTTPException(status_code=502, detail={'code': 'AI_GAME_GENERATION_FAILED', 'message': 'De AI leverde niet voor iedere speler speldata.'})
     generation_id = uuid.uuid4()
     payload = generated.model_dump() if hasattr(generated, 'model_dump') else generated.dict()
-    await conn.execute('INSERT INTO generated_games(id, game_preset, mode, difficulty, duration, payload) VALUES($1, $2, $3, $4, $5, $6)', generation_id, game['id'], mode, generated.difficulty, generated.duration, json.dumps(payload))
-    await conn.executemany('INSERT INTO game_phases(generated_game_id, phase_number, name, purpose, open_question, release_after_days, objectives) VALUES($1, $2, $3, $4, $5, $6, $7)', [(generation_id, phase.number, phase.name, phase.purpose, phase.open_question, phase.release_after_days, json.dumps(phase.objectives)) for phase in generated.phases])
-    await conn.executemany('INSERT INTO game_events(id, generated_game_id, phase_number, title, description, delivery, release_after_days, player_ids) VALUES($1, $2, $3, $4, $5, $6, $7, $8)', [(event.id, generation_id, event.phase, event.title, event.description, event.delivery, event.release_after_days, json.dumps(event.player_ids)) for event in generated.events])
-    await conn.executemany('INSERT INTO voting_moments(id, generated_game_id, phase_number, question, release_after_days, duration_hours) VALUES($1, $2, $3, $4, $5, $6)', [(moment.id, generation_id, moment.phase, moment.question, moment.release_after_days, moment.duration_hours) for moment in generated.voting_moments])
     output = []
     for index, generated_player in enumerate(generated.players):
         player = generated_player.model_dump() if hasattr(generated_player, 'model_dump') else generated_player.dict()
         player['name'] = names[index]
         player['email'] = f'test-speler-{index + 1}@example.com' if mode == 'test' else ''
-        await conn.execute('INSERT INTO generated_player_data(generated_game_id, player_id, payload) VALUES($1, $2, $3)', generation_id, player['player_id'], json.dumps(player))
         output.append(player)
+    try:
+        async with conn.transaction():
+            await conn.execute('INSERT INTO generated_games(id, game_preset, mode, difficulty, duration, payload) VALUES($1, $2, $3, $4, $5, $6)', generation_id, game['id'], mode, generated.difficulty, generated.duration, json.dumps(payload))
+            await conn.executemany('INSERT INTO game_phases(generated_game_id, phase_number, name, purpose, open_question, release_after_days, objectives) VALUES($1, $2, $3, $4, $5, $6, $7)', [(generation_id, phase.number, phase.name, phase.purpose, phase.open_question, phase.release_after_days, json.dumps(phase.objectives)) for phase in generated.phases])
+            await conn.executemany('INSERT INTO game_events(id, generated_game_id, phase_number, title, description, delivery, release_after_days, player_ids) VALUES($1, $2, $3, $4, $5, $6, $7, $8)', [(event.id, generation_id, event.phase, event.title, event.description, event.delivery, event.release_after_days, json.dumps(event.player_ids)) for event in generated.events])
+            await conn.executemany('INSERT INTO voting_moments(id, generated_game_id, phase_number, question, release_after_days, duration_hours) VALUES($1, $2, $3, $4, $5, $6)', [(moment.id, generation_id, moment.phase, moment.question, moment.release_after_days, moment.duration_hours) for moment in generated.voting_moments])
+            await conn.executemany('INSERT INTO generated_player_data(generated_game_id, player_id, payload) VALUES($1, $2, $3)', [(generation_id, player['player_id'], json.dumps(player)) for player in output])
+    except asyncpg.PostgresError:
+        logger.exception('Failed to save generated game')
+        raise HTTPException(status_code=500, detail={'code': 'GAME_SAVE_FAILED', 'message': 'De game kon niet worden opgeslagen.'}) from None
     return str(generation_id), generated, output
 
 
