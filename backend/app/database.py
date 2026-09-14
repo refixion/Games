@@ -180,6 +180,8 @@ async def init_db():
             await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS voting_active BOOLEAN DEFAULT FALSE")
             await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT 'avond'")
             await conn.execute("ALTER TABLE game_state ADD COLUMN IF NOT EXISTS active_generation_id UUID")
+            await conn.execute("ALTER TABLE generated_games ADD COLUMN IF NOT EXISTS difficulty TEXT DEFAULT 'medium'")
+            await conn.execute("ALTER TABLE generated_games ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT 'avond'")
             poll_id = await conn.fetchval('SELECT id FROM polls ORDER BY id LIMIT 1')
             if poll_id is None:
                 poll_id = await conn.fetchval("INSERT INTO polls(question, active) VALUES($1, FALSE) RETURNING id", 'Welke game spreekt je het meest aan?')

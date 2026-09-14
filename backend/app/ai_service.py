@@ -229,6 +229,20 @@ class AIService:
             except ValidationError as exc:
                 logger.error('AI generation validation failed on attempt %s: %s', attempt, exc.errors())
                 last_error = exc
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+
+                logger.error(
+                    'Groq API error %s: %s',
+                    status,
+                    exc.response.text[:4000],
+                )
+
+                last_error = exc
+
+                if status not in {429, 500, 502, 503, 504}:
+                    break
+
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 logger.exception('AI game generation request failed on attempt %s', attempt)
                 last_error = exc
@@ -254,8 +268,10 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
         for child in schema.get(key, []):
             if isinstance(child, dict):
                 _strict_schema(child)
-    for definition in schema.get('$defs', {}).values():
-        _strict_schema(definition)
+    for definitions_key in ('$defs', 'definitions'):
+        for definition in schema.get(definitions_key, {}).values():
+            _strict_schema(definition)
+
     return schema
 
 

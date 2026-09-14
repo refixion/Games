@@ -3,6 +3,6 @@ uvicorn[standard]
 asyncpg
 python-dotenv
 httpx
-pydantic
-pydantic-settings
+pydantic>=2,<3
+pydantic-settings>=2,<3
 email-validator
