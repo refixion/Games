@@ -177,6 +177,9 @@ class AIService:
                     'solution and difficulty are mandatory. '
                     'difficulty must be exactly easy, medium, or hard. '
                     'solution and truth_model are secret canonical information and must never be shown to normal players. Include duration, phases, events, clues and voting_moments.'
+                    'personal_objectives MUST be a list of objective objects matching the requested structure.',
+                    'relationships MUST be a list of strings, never an object or dictionary.',
+                    'is_saboteur MUST be a boolean.',
                 )
             },
             {
@@ -192,9 +195,19 @@ class AIService:
                                 'story',
                                 'objective',
                                 'rules',
-                                'difficulty',
+                                'players',
                                 'solution',
-                                'players'
+                                'difficulty',
+                                'duration',
+                                'saboteur_count',
+                                'team_win_condition',
+                                'individual_win_condition',
+                                'saboteur_win_condition',
+                                'truth_model',
+                                'phases',
+                                'events',
+                                'voting_moments',
+                                'clues'
                             ],
                             'player_required_fields': [
                                 'player_id',
@@ -202,10 +215,12 @@ class AIService:
                                 'role',
                                 'role_description',
                                 'objective',
+                                'personal_objectives',
                                 'secret_information',
                                 'clues',
                                 'relationships',
-                                'instructions'
+                                'instructions',
+                                'is_saboteur'
                             ],
                             'difficulty': ['easy', 'medium', 'hard']
                         }
