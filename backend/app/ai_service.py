@@ -159,8 +159,10 @@ class AIService:
         }
 
         body = {
-            'model': settings.ai_model,
-            'temperature': 0.2,
+        'model': settings.ai_model,
+        'temperature': 0.2,
+        'include_reasoning': False,
+        'max_completion_tokens': 16384,
         'messages': [
             {
                 'role': 'system',
