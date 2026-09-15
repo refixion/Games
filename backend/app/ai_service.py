@@ -178,68 +178,39 @@ class AIService:
             "difficulty": difficulty,
             "duration": duration,
             "clue_count": clue_count,
-            "language": (
-                "Nederlands voor alle player-facing content; "
-                "role names exact uit de role pool en Engels."
-            ),
-            "design_process": [
-                "Maak eerst intern een canonical truth model met wie, wat, waar, wanneer en waarom.",
-                "Plan daarna rolbalans, sabotage, phases, events, clue dependencies en voting moments.",
-                "Schrijf daarna alle player-facing content vanuit dat model.",
-                "Controleer daarna alle IDs, relaties, objectives, clues, fases, events en stemmomenten.",
-                "Controleer dat de solution logisch volgt uit de clues.",
-                "Bij lange durations moeten progression, delayed information en minstens één twist aanwezig zijn.",
-            ],
-            "duration_rules": {
-                "avond": (
-                    "1-2 voting moments, 1-4 uur, "
-                    "compacte finale en weinig delayed events."
-                ),
-                "1_week": (
-                    "meerdere speelmomenten, minstens 1 vervolgverdenking "
-                    "en enkele events."
-                ),
-                "2_weken": (
-                    "minstens 3 phases, 2 voting moments, verspreide clues, "
-                    "sociale interactie en een twist."
-                ),
-                "3_weken": (
-                    "uitgebreide progression, meerdere releases, "
-                    "objectives en revelations."
-                ),
-                "1_maand": (
-                    "campagnegevoel, minstens 5 phases, 3+ voting moments, "
-                    "events, mid-game twist en finale."
-                ),
-            },
+            "language": "Nederlands",
             "requirements": [
-                "Return ONLY the requested structured JSON game object.",
+                "Return ONLY valid JSON.",
                 "Do not return markdown.",
-                "Do not wrap the JSON in ```json fences.",
-                "The output MUST contain every field listed in output_requirements.",
-                "game_id is an immutable canonical identifier. "
-                "Return exactly the provided game_id. "
-                "Never translate, capitalize, rename, or modify it.",
-                "game_name must be exactly the provided human-readable game name.",
-                "difficulty MUST be exactly easy, medium, or hard.",
-                "duration MUST be exactly the requested duration.",
-                "solution is the secret canonical solution and must never be shown to normal players.",
-                "truth_model is secret canonical information and must never be shown to normal players.",
-                "Generate exactly one player for every requested name.",
-                "Players MUST remain in exactly the same order as the requested players.",
-                "Each player must have exactly one role from available_roles.",
-                "personal_objectives MUST be a JSON array of objective objects matching the requested structure.",
-                "Every personal objective owner_player_id MUST equal the player's player_id.",
-                "relationships MUST be a JSON array of strings. Never use an object or dictionary.",
-                "is_saboteur MUST be a JSON boolean: true or false.",
-                "clues on a player MUST be a JSON array of strings.",
-                "Every global clue owner_player_id MUST reference an existing player_id.",
-                "Every event player_ids value MUST contain existing player_ids.",
-                "All player-facing text must be in Dutch.",
-                "Role names must exactly match the available role pool.",
-                "Generate phases, delayed events, voting moments, clue dependencies and a truth model.",
+                "Generate exactly one player per requested name.",
+                "Use exactly the requested player IDs.",
+                "Use exactly one role from available_roles per player.",
+                "personal_objectives must be arrays.",
+                "relationships must be arrays of strings.",
+                "is_saboteur must be boolean.",
+                "phases must use numbered phases.",
+                "events must reference numbered phases.",
+                "voting moments must reference numbered phases.",
+                "clues must reference numbered phases.",
+                "All player-facing text must be Dutch.",
             ],
         }
+
+        system_prompt = (
+            "You are a professional tabletop game designer. "
+            "Return ONLY one valid JSON game object. "
+            "Do not use markdown or code fences. "
+            "Follow output_requirements exactly. "
+            "All phase references use integer phase numbers, never phase names. "
+            "Use id for IDs, never phase_id, event_id, voting_id or clue_id. "
+            "Use title for event titles. "
+            "Use question for voting questions. "
+            "Use text for clue text. "
+            "relationships must always be an array of strings. "
+            "personal_objectives must always be an array of objects. "
+            "metric must be one of the allowed metric values. "
+            "activate_phase must always be an integer."
+        )
 
         body = {
             "model": settings.ai_model,
@@ -250,29 +221,7 @@ class AIService:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a professional tabletop game designer. "
-                        "Return ONLY the requested JSON game object. "
-                        "The generated game MUST contain game_id, game_name, "
-                        "title, story, objective, rules, difficulty, "
-                        "solution, players, duration, saboteur_count, "
-                        "team_win_condition, individual_win_condition, "
-                        "saboteur_win_condition, truth_model, phases, "
-                        "events, voting_moments and clues. "
-                        "game_id is an immutable canonical identifier and "
-                        "MUST exactly match the provided game_id. "
-                        "Never translate, capitalize, rename, or modify it. "
-                        "game_name MUST exactly match the provided game_name. "
-                        "difficulty must be exactly easy, medium, or hard. "
-                        "duration MUST exactly match the requested duration. "
-                        "solution and truth_model are secret canonical "
-                        "information and must never be shown to normal players. "
-                        "personal_objectives MUST be a JSON array of objective "
-                        "objects matching the requested structure. "
-                        "relationships MUST be a JSON array of strings, "
-                        "never an object or dictionary. "
-                        "is_saboteur MUST be a JSON boolean."
-                    ),
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
@@ -314,27 +263,40 @@ class AIService:
                                     "instructions",
                                     "is_saboteur",
                                 ],
-                                "personal_objective_required_fields": [
+                                "phase_required_fields": [
+                                    "number",
+                                    "name",
+                                    "purpose",
+                                    "open_question",
+                                    "release_after_days",
+                                    "objectives",
+                                ],
+                                "event_required_fields": [
+                                    "id",
+                                    "phase",
+                                    "title",
+                                    "description",
+                                    "delivery",
+                                    "release_after_days",
+                                    "player_ids",
+                                ],
+                                "voting_required_fields": [
+                                    "id",
+                                    "phase",
+                                    "question",
+                                    "release_after_days",
+                                    "duration_hours",
+                                ],
+                                "clue_required_fields": [
                                     "id",
                                     "text",
+                                    "clue_type",
                                     "owner_player_id",
-                                    "measurable",
-                                    "metric",
-                                    "target_player_id",
-                                    "target_value",
-                                    "activate_phase",
-                                ],
-                                "difficulty": [
-                                    "easy",
-                                    "medium",
-                                    "hard",
-                                ],
-                                "duration": [
-                                    "avond",
-                                    "1_week",
-                                    "2_weken",
-                                    "3_weken",
-                                    "1_maand",
+                                    "release_phase",
+                                    "visibility",
+                                    "supports",
+                                    "dependencies",
+                                    "red_herring",
                                 ],
                             },
                         },
@@ -366,7 +328,6 @@ class AIService:
                     response.raise_for_status()
 
                     response_data = response.json()
-
                     content = response_data["choices"][0]["message"]["content"]
 
                     if not isinstance(content, str):
@@ -375,6 +336,14 @@ class AIService:
                         )
 
                     raw = json.loads(content)
+
+                    # BELANGRIJK:
+                    # Normaliseer de structuur van het model voordat
+                    # Pydantic hem valideert.
+                    raw = _normalize_generation(
+                        raw,
+                        names=names,
+                    )
 
                     if hasattr(GeneratedGame, "model_validate"):
                         generated = GeneratedGame.model_validate(raw)
@@ -435,6 +404,798 @@ class AIService:
         ) from last_error
 
 
+def _phase_number(value: Any, phases: list[dict[str, Any]]) -> int:
+    """Convert phase names/IDs/numbers into our internal integer phase."""
+
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, str):
+        value_lower = value.lower().strip()
+
+        if value_lower.isdigit():
+            return int(value_lower)
+
+        for index, phase in enumerate(phases, start=1):
+            phase_id = str(
+                phase.get("phase_id", phase.get("id", ""))
+            ).lower()
+
+            phase_name = str(
+                phase.get("name", "")
+            ).lower()
+
+            if value_lower in {
+                phase_id,
+                phase_name,
+            }:
+                return index
+
+    return 1
+
+
+def _normalize_generation(
+    raw: dict[str, Any],
+    *,
+    names: list[str],
+) -> dict[str, Any]:
+    """
+    Normalize common GPT output variations into the exact internal schema.
+
+    The model sometimes naturally generates:
+      phase_id -> number
+      event_id -> id
+      voting_id -> id
+      clue_id -> id
+      event.name -> title
+      phase names instead of phase numbers
+
+    This converts those forms before Pydantic validation.
+    """
+
+    if not isinstance(raw, dict):
+        raise ValueError("AI output must be a JSON object")
+
+    # ---------------------------------------------------------
+    # PHASES
+    # ---------------------------------------------------------
+
+    phases = raw.get("phases", [])
+
+    if not isinstance(phases, list):
+        phases = []
+
+    normalized_phases = []
+
+    for index, phase in enumerate(phases, start=1):
+        if not isinstance(phase, dict):
+            continue
+
+        phase_name = str(
+            phase.get(
+                "name",
+                phase.get(
+                    "phase_name",
+                    phase.get(
+                        "phase_id",
+                        f"Fase {index}",
+                    ),
+                ),
+            )
+        )
+
+        normalized_phases.append(
+            {
+                "number": index,
+                "name": phase_name,
+                "purpose": str(
+                    phase.get(
+                        "purpose",
+                        phase.get(
+                            "description",
+                            phase.get(
+                                "goal",
+                                phase_name,
+                            ),
+                        ),
+                    )
+                ),
+                "open_question": str(
+                    phase.get(
+                        "open_question",
+                        phase.get(
+                            "question",
+                            "Wat gebeurt er in deze fase?",
+                        ),
+                    )
+                ),
+                "release_after_days": _safe_int(
+                    phase.get(
+                        "release_after_days",
+                        0,
+                    ),
+                    0,
+                ),
+                "objectives": _string_list(
+                    phase.get(
+                        "objectives",
+                        phase.get(
+                            "goals",
+                            ["Onderzoek de situatie."],
+                        ),
+                    )
+                ),
+            }
+        )
+
+    raw["phases"] = normalized_phases
+
+    # ---------------------------------------------------------
+    # PLAYER DATA
+    # ---------------------------------------------------------
+
+    players = raw.get("players", [])
+
+    if not isinstance(players, list):
+        players = []
+
+    # First collect global clues. Player clues can be populated
+    # from these if the model leaves them empty.
+    global_clues = raw.get("clues", [])
+
+    if not isinstance(global_clues, list):
+        global_clues = []
+
+    global_clue_texts = []
+
+    for clue in global_clues:
+        if isinstance(clue, dict):
+            text = clue.get("text", clue.get("description", ""))
+            if text:
+                global_clue_texts.append(str(text))
+        elif isinstance(clue, str):
+            global_clue_texts.append(clue)
+
+    normalized_players = []
+
+    for index, player in enumerate(players):
+        if not isinstance(player, dict):
+            continue
+
+        player_id = str(
+            player.get(
+                "player_id",
+                index + 1,
+            )
+        )
+
+        player_name = str(
+            player.get(
+                "name",
+                names[index] if index < len(names) else f"Speler {index + 1}",
+            )
+        )
+
+        # -------------------------
+        # Relationships
+        # -------------------------
+
+        relationships = player.get(
+            "relationships",
+            [],
+        )
+
+        if isinstance(relationships, dict):
+            relationships = [
+                f"{key}: {value}"
+                for key, value in relationships.items()
+            ]
+        elif isinstance(relationships, str):
+            relationships = [relationships]
+        elif not isinstance(relationships, list):
+            relationships = []
+
+        relationships = [
+            str(item)
+            for item in relationships
+        ]
+
+        # -------------------------
+        # Clues
+        # -------------------------
+
+        player_clues = player.get(
+            "clues",
+            [],
+        )
+
+        if isinstance(player_clues, str):
+            player_clues = [player_clues]
+
+        if not isinstance(player_clues, list):
+            player_clues = []
+
+        player_clues = [
+            str(item)
+            for item in player_clues
+            if str(item).strip()
+        ]
+
+        # If AI didn't put clues on players,
+        # use global clue texts so validation doesn't fail.
+        if len(player_clues) < 2:
+            for clue_text in global_clue_texts:
+                if clue_text not in player_clues:
+                    player_clues.append(clue_text)
+
+                if len(player_clues) >= 2:
+                    break
+
+        # -------------------------
+        # Personal objectives
+        # -------------------------
+
+        objectives = player.get(
+            "personal_objectives",
+            [],
+        )
+
+        if isinstance(objectives, dict):
+            objectives = [objectives]
+
+        if not isinstance(objectives, list):
+            objectives = []
+
+        normalized_objectives = []
+
+        for objective_index, objective in enumerate(objectives):
+            if not isinstance(objective, dict):
+                continue
+
+            metric = objective.get(
+                "metric",
+                "manual_review",
+            )
+
+            metric_map = {
+                "clues": "clue_found",
+                "clue": "clue_found",
+                "find_clue": "clue_found",
+                "votes": "vote_received",
+                "vote": "vote_received",
+                "suspected": "top_suspect",
+                "avoid_suspicion": "not_top_suspect",
+                "theory": "theory_adopted",
+                "change_vote": "vote_change",
+                "manual": "manual_review",
+            }
+
+            metric = metric_map.get(
+                str(metric).lower(),
+                metric,
+            )
+
+            allowed_metrics = {
+                "vote_received",
+                "top_suspect",
+                "not_top_suspect",
+                "mutual_suspicion",
+                "theory_adopted",
+                "vote_change",
+                "clue_found",
+                "manual_review",
+            }
+
+            if metric not in allowed_metrics:
+                metric = "manual_review"
+
+            activate_phase = objective.get(
+                "activate_phase",
+                1,
+            )
+
+            # "planning", "execution", "escape", etc.
+            # moeten integers worden.
+            activate_phase = _phase_number(
+                activate_phase,
+                phases,
+            )
+
+            normalized_objectives.append(
+                {
+                    "id": str(
+                        objective.get(
+                            "id",
+                            f"{player_id}-objective-{objective_index + 1}",
+                        )
+                    ),
+                    "text": str(
+                        objective.get(
+                            "text",
+                            objective.get(
+                                "description",
+                                objective.get(
+                                    "objective",
+                                    "Bereik je persoonlijke doel.",
+                                ),
+                            ),
+                        )
+                    ),
+                    "owner_player_id": player_id,
+                    "measurable": bool(
+                        objective.get(
+                            "measurable",
+                            False,
+                        )
+                    ),
+                    "metric": metric,
+                    "target_player_id": (
+                        str(objective["target_player_id"])
+                        if objective.get("target_player_id") is not None
+                        else None
+                    ),
+                    "target_value": (
+                        _safe_int(objective["target_value"], None)
+                        if objective.get("target_value") is not None
+                        else None
+                    ),
+                    "activate_phase": activate_phase,
+                }
+            )
+
+        if not normalized_objectives:
+            normalized_objectives.append(
+                {
+                    "id": f"{player_id}-objective-1",
+                    "text": str(
+                        player.get(
+                            "objective",
+                            "Bereik je persoonlijke doel.",
+                        )
+                    ),
+                    "owner_player_id": player_id,
+                    "measurable": False,
+                    "metric": "manual_review",
+                    "target_player_id": None,
+                    "target_value": None,
+                    "activate_phase": 1,
+                }
+            )
+
+        normalized_players.append(
+            {
+                "player_id": player_id,
+                "name": player_name,
+                "role": str(
+                    player.get(
+                        "role",
+                        "Player",
+                    )
+                ),
+                "role_description": str(
+                    player.get(
+                        "role_description",
+                        player.get(
+                            "description",
+                            "",
+                        ),
+                    )
+                ),
+                "objective": str(
+                    player.get(
+                        "objective",
+                        "Bereik je persoonlijke doel.",
+                    )
+                ),
+                "personal_objectives": normalized_objectives,
+                "secret_information": str(
+                    player.get(
+                        "secret_information",
+                        player.get(
+                            "secret",
+                            "",
+                        ),
+                    )
+                ),
+                "clues": player_clues,
+                "relationships": relationships,
+                "instructions": str(
+                    player.get(
+                        "instructions",
+                        "",
+                    )
+                ),
+                "is_saboteur": bool(
+                    player.get(
+                        "is_saboteur",
+                        False,
+                    )
+                ),
+            }
+        )
+
+    raw["players"] = normalized_players
+
+    # ---------------------------------------------------------
+    # EVENTS
+    # ---------------------------------------------------------
+
+    events = raw.get("events", [])
+
+    if not isinstance(events, list):
+        events = []
+
+    normalized_events = []
+
+    for index, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            continue
+
+        player_ids = event.get(
+            "player_ids",
+            [],
+        )
+
+        if isinstance(player_ids, str):
+            player_ids = [player_ids]
+
+        if not isinstance(player_ids, list):
+            player_ids = []
+
+        # Events cannot have an empty player_ids list.
+        if not player_ids:
+            player_ids = [
+                str(index)
+                if index <= len(names)
+                else "1"
+            ]
+
+        normalized_events.append(
+            {
+                "id": str(
+                    event.get(
+                        "id",
+                        event.get(
+                            "event_id",
+                            f"event-{index}",
+                        ),
+                    )
+                ),
+                "phase": _phase_number(
+                    event.get(
+                        "phase",
+                        event.get(
+                            "phase_id",
+                            1,
+                        ),
+                    ),
+                    phases,
+                ),
+                "title": str(
+                    event.get(
+                        "title",
+                        event.get(
+                            "name",
+                            f"Event {index}",
+                        ),
+                    )
+                ),
+                "description": str(
+                    event.get(
+                        "description",
+                        event.get(
+                            "details",
+                            "",
+                        ),
+                    )
+                ),
+                "delivery": _normalize_delivery(
+                    event.get(
+                        "delivery",
+                        "website",
+                    )
+                ),
+                "release_after_days": _safe_int(
+                    event.get(
+                        "release_after_days",
+                        0,
+                    ),
+                    0,
+                ),
+                "player_ids": [
+                    str(player_id)
+                    for player_id in player_ids
+                ],
+            }
+        )
+
+    raw["events"] = normalized_events
+
+    # ---------------------------------------------------------
+    # VOTING MOMENTS
+    # ---------------------------------------------------------
+
+    voting_moments = raw.get(
+        "voting_moments",
+        [],
+    )
+
+    if not isinstance(voting_moments, list):
+        voting_moments = []
+
+    normalized_votes = []
+
+    for index, voting in enumerate(
+        voting_moments,
+        start=1,
+    ):
+        if not isinstance(voting, dict):
+            continue
+
+        normalized_votes.append(
+            {
+                "id": str(
+                    voting.get(
+                        "id",
+                        voting.get(
+                            "voting_id",
+                            f"vote-{index}",
+                        ),
+                    )
+                ),
+                "phase": _phase_number(
+                    voting.get(
+                        "phase",
+                        voting.get(
+                            "phase_id",
+                            1,
+                        ),
+                    ),
+                    phases,
+                ),
+                "question": str(
+                    voting.get(
+                        "question",
+                        voting.get(
+                            "name",
+                            "Wie verdenken jullie?",
+                        ),
+                    )
+                ),
+                "release_after_days": _safe_int(
+                    voting.get(
+                        "release_after_days",
+                        0,
+                    ),
+                    0,
+                ),
+                "duration_hours": max(
+                    1,
+                    min(
+                        168,
+                        _safe_int(
+                            voting.get(
+                                "duration_hours",
+                                24,
+                            ),
+                            24,
+                        ),
+                    ),
+                ),
+            }
+        )
+
+    raw["voting_moments"] = normalized_votes
+
+    # ---------------------------------------------------------
+    # CLUES
+    # ---------------------------------------------------------
+
+    normalized_clues = []
+
+    for index, clue in enumerate(
+        global_clues,
+        start=1,
+    ):
+        if not isinstance(clue, dict):
+            continue
+
+        clue_phase = clue.get(
+            "release_phase",
+            clue.get(
+                "phase",
+                clue.get(
+                    "phase_id",
+                    1,
+                ),
+            ),
+        )
+
+        clue_type = clue.get(
+            "clue_type",
+            "direct",
+        )
+
+        allowed_clue_types = {
+            "direct",
+            "indirect",
+            "relational",
+            "timeline",
+            "alibi",
+            "location",
+            "object",
+            "witness",
+            "confirming",
+            "crucial",
+            "red_herring",
+            "personal",
+        }
+
+        if clue_type not in allowed_clue_types:
+            clue_type = "direct"
+
+        supports = clue.get(
+            "supports",
+            [],
+        )
+
+        if isinstance(supports, str):
+            supports = [supports]
+
+        if not isinstance(supports, list):
+            supports = []
+
+        if not supports:
+            supports = ["solution"]
+
+        dependencies = clue.get(
+            "dependencies",
+            [],
+        )
+
+        if isinstance(dependencies, str):
+            dependencies = [dependencies]
+
+        if not isinstance(dependencies, list):
+            dependencies = []
+
+        normalized_clues.append(
+            {
+                "id": str(
+                    clue.get(
+                        "id",
+                        clue.get(
+                            "clue_id",
+                            f"clue-{index}",
+                        ),
+                    )
+                ),
+                "text": str(
+                    clue.get(
+                        "text",
+                        clue.get(
+                            "description",
+                            "",
+                        ),
+                    )
+                ),
+                "clue_type": clue_type,
+                "owner_player_id": str(
+                    clue.get(
+                        "owner_player_id",
+                        "1",
+                    )
+                ),
+                "release_phase": _phase_number(
+                    clue_phase,
+                    phases,
+                ),
+                "visibility": _normalize_visibility(
+                    clue.get(
+                        "visibility",
+                        "public",
+                    )
+                ),
+                "supports": [
+                    str(item)
+                    for item in supports
+                ],
+                "dependencies": [
+                    str(item)
+                    for item in dependencies
+                ],
+                "red_herring": bool(
+                    clue.get(
+                        "red_herring",
+                        False,
+                    )
+                ),
+            }
+        )
+
+    raw["clues"] = normalized_clues
+
+    return raw
+
+
+def _safe_int(
+    value: Any,
+    default: int | None,
+) -> int | None:
+    try:
+        if value is None:
+            return default
+
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+
+    if not isinstance(value, list):
+        return []
+
+    result = [
+        str(item)
+        for item in value
+        if str(item).strip()
+    ]
+
+    return result or ["Onderzoek de situatie."]
+
+
+def _normalize_delivery(value: Any) -> str:
+    allowed = {
+        "website",
+        "email",
+        "physical_clue",
+        "qr_code",
+        "whatsapp",
+        "printed_document",
+    }
+
+    value = str(value).lower().strip()
+
+    mapping = {
+        "web": "website",
+        "site": "website",
+        "mail": "email",
+        "physical": "physical_clue",
+        "physical clue": "physical_clue",
+        "qr": "qr_code",
+        "document": "printed_document",
+        "print": "printed_document",
+    }
+
+    value = mapping.get(value, value)
+
+    return value if value in allowed else "website"
+
+
+def _normalize_visibility(value: Any) -> str:
+    allowed = {
+        "public",
+        "private",
+        "shareable",
+    }
+
+    value = str(value).lower().strip()
+
+    mapping = {
+        "shared": "shareable",
+        "everyone": "public",
+        "all": "public",
+        "secret": "private",
+    }
+
+    value = mapping.get(value, value)
+
+    return value if value in allowed else "public"
+
+
 def _validate_generation(
     generated: GeneratedGame,
     game: dict[str, Any],
@@ -443,7 +1204,6 @@ def _validate_generation(
     requested_difficulty: str,
     requested_duration: str,
 ) -> None:
-    # Canonical game information
     if generated.game_id != game["id"]:
         raise ValueError(
             "canonical game_id must match selected game"
@@ -472,7 +1232,6 @@ def _validate_generation(
     if not generated.truth_model.strip():
         raise ValueError("truth_model cannot be empty")
 
-    # Players
     if len(generated.players) != len(names):
         raise ValueError(
             f"expected {len(names)} players, "
@@ -499,23 +1258,23 @@ def _validate_generation(
         for role in game["roles"]
     }
 
-    for index, player in enumerate(generated.players):
-        expected_id = str(index + 1)
-        expected_name = names[index]
-
-        if player.player_id != expected_id:
+    for index, player in enumerate(
+        generated.players
+    ):
+        if player.player_id != str(index + 1):
             raise ValueError(
                 f"player {index + 1} has invalid player_id"
             )
 
-        if player.name != expected_name:
+        if player.name != names[index]:
             raise ValueError(
                 f"player {index + 1} has invalid name"
             )
 
         if player.role not in role_names:
             raise ValueError(
-                f"player {index + 1} has invalid role: {player.role}"
+                f"player {index + 1} has invalid role: "
+                f"{player.role}"
             )
 
         if len(player.clues) < max(1, clue_count):
@@ -525,18 +1284,17 @@ def _validate_generation(
 
         if not player.personal_objectives:
             raise ValueError(
-                f"player {index + 1} has no personal objectives"
+                f"player {index + 1} has no personal objective"
             )
 
         for objective in player.personal_objectives:
             if objective.owner_player_id != player.player_id:
                 raise ValueError(
                     f"objective {objective.id} belongs to "
-                    f"{objective.owner_player_id}, but is assigned to "
-                    f"{player.player_id}"
+                    f"{objective.owner_player_id}, but is assigned "
+                    f"to {player.player_id}"
                 )
 
-    # Saboteur count
     actual_saboteurs = sum(
         1
         for player in generated.players
@@ -553,7 +1311,6 @@ def _validate_generation(
             "at least one saboteur is required"
         )
 
-    # Duration requirements
     minimum_phases = (
         5
         if requested_duration == "1_maand"
@@ -580,7 +1337,6 @@ def _validate_generation(
             f"duration requires at least {minimum_votes} voting moments"
         )
 
-    # Phase IDs
     phase_numbers = {
         phase.number
         for phase in generated.phases
@@ -591,7 +1347,6 @@ def _validate_generation(
             "phase numbers must be unique"
         )
 
-    # Voting moments
     voting_ids = [
         voting.id
         for voting in generated.voting_moments
@@ -609,7 +1364,6 @@ def _validate_generation(
                 f"unknown phase {voting.phase}"
             )
 
-    # Events
     event_ids = [
         event.id
         for event in generated.events
@@ -630,11 +1384,10 @@ def _validate_generation(
         for player_id in event.player_ids:
             if player_id not in actual_player_ids:
                 raise ValueError(
-                    f"event {event.id} references unknown player "
-                    f"{player_id}"
+                    f"event {event.id} references "
+                    f"unknown player {player_id}"
                 )
 
-    # Global clues
     clue_ids = [
         clue.id
         for clue in generated.clues
@@ -674,13 +1427,6 @@ def _validate_generation(
                     f"clue {clue.id} references unknown "
                     f"dependency {dependency}"
                 )
-
-    # Player clue count
-    for index, player in enumerate(generated.players):
-        if len(player.clues) < max(1, clue_count):
-            raise ValueError(
-                f"player {index + 1} has insufficient player clues"
-            )
 
 
 ai_service = AIService()
