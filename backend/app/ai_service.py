@@ -157,8 +157,7 @@ class AIService:
                 'Generate phases, delayed events, voting moments, clue dependencies and a truth model. Keep all player-facing content in Dutch.',
             ],
         }
-        schema = GeneratedGame.model_json_schema() if hasattr(GeneratedGame, 'model_json_schema') else GeneratedGame.schema()
-        schema = _strict_schema(schema)
+
         body = {
             'model': settings.ai_model,
             'temperature': 0.2,
@@ -212,7 +211,7 @@ class AIService:
                 )
             },
         ],
-            'response_format': {'type': 'json_schema', 'json_schema': {'name': 'generated_game', 'strict': True, 'schema': schema}},
+            'response_format': {'type': 'json_object'},
         }
         headers = {'Authorization': f'Bearer {settings.ai_api_key}', 'Content-Type': 'application/json'}
         last_error: Exception | None = None
