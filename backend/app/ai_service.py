@@ -169,7 +169,7 @@ class AIService:
                 'role': 'system',
                 'content': (
                     'You are a professional tabletop game designer. '
-                    'Return ONLY the requested structured game object. '
+                    'Return ONLY the requested JSON game object.'
                     'The generated game MUST contain game_id, game_name, title, story, '
                     'objective, rules, difficulty, solution, and players. '
                     'game_id is an immutable canonical identifier and MUST exactly match '
