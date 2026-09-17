@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .config import settings
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,51 +23,6 @@ Duration = Literal[
     "3_weken",
     "1_maand",
 ]
-
-
-ALLOWED_OBJECTIVE_METRICS = {
-    "vote_received",
-    "top_suspect",
-    "not_top_suspect",
-    "mutual_suspicion",
-    "theory_adopted",
-    "vote_change",
-    "clue_found",
-    "manual_review",
-}
-
-
-ALLOWED_CLUE_TYPES = {
-    "direct",
-    "indirect",
-    "relational",
-    "timeline",
-    "alibi",
-    "location",
-    "object",
-    "witness",
-    "confirming",
-    "crucial",
-    "red_herring",
-    "personal",
-}
-
-
-ALLOWED_DELIVERIES = {
-    "website",
-    "email",
-    "physical_clue",
-    "qr_code",
-    "whatsapp",
-    "printed_document",
-}
-
-
-ALLOWED_VISIBILITIES = {
-    "public",
-    "private",
-    "shareable",
-}
 
 
 class GeneratedClue(BaseModel):
@@ -202,12 +158,23 @@ class GeneratedGame(BaseModel):
     individual_win_condition: str
     saboteur_win_condition: str
     truth_model: str
-    phases: list[GeneratedPhase] = Field(min_length=1)
-    events: list[GeneratedEvent] = Field(default_factory=list)
+    phases: list[GeneratedPhase] = Field(
+        min_length=1
+    )
+    events: list[GeneratedEvent] = Field(
+        default_factory=list
+    )
     voting_moments: list[GeneratedVotingMoment] = Field(
         min_length=1
     )
-    clues: list[GeneratedClue] = Field(min_length=1)
+    clues: list[GeneratedClue] = Field(
+        min_length=1
+    )
+
+
+# ============================================================
+# AI SERVICE
+# ============================================================
 
 
 class AIService:
@@ -220,6 +187,7 @@ class AIService:
         duration: str = "avond",
         clue_count: int = 3,
     ) -> GeneratedGame:
+
         if not settings.ai_api_key:
             raise AIProviderUnavailable(
                 "AI_PROVIDER_NOT_CONFIGURED: "
@@ -228,105 +196,97 @@ class AIService:
 
         if not names:
             raise ValueError(
-                "AI_GAME_GENERATION_FAILED: minimaal één speler vereist."
+                "Er moet minimaal één speler zijn."
             )
 
-        clue_count = max(2, int(clue_count))
+        role_names = [
+            str(role.get("name", "")).strip()
+            for role in game.get("roles", [])
+            if isinstance(role, dict)
+            and str(role.get("name", "")).strip()
+        ]
+
+        if not role_names:
+            raise ValueError(
+                "De geselecteerde game heeft geen rollen."
+            )
+
+        # ----------------------------------------------------
+        # Belangrijk:
+        #
+        # De AI MAG NIET de uiteindelijke rolverdeling bepalen.
+        # Hij mag inhoud voor rollen schrijven, maar de backend
+        # corrigeert de verdeling daarna.
+        # ----------------------------------------------------
+
+        player_payload = [
+            {
+                "player_id": str(index + 1),
+                "name": name,
+            }
+            for index, name in enumerate(names)
+        ]
 
         prompt = {
             "game_id": game["id"],
             "game_name": game["name"],
             "game_rules": game.get("rules", []),
-            "available_roles": [
-                role["name"]
-                for role in game.get("roles", [])
-            ],
-            "players": [
-                {
-                    "player_id": str(index + 1),
-                    "name": name,
-                }
-                for index, name in enumerate(names)
-            ],
+            "available_roles": role_names,
+            "players": player_payload,
             "theme": game.get("theme", {}),
-            "objective": game.get(
-                "goal",
-                "Voltooi het spel.",
-            ),
+            "objective": game.get("goal", ""),
             "difficulty": difficulty,
             "duration": duration,
-            "clue_count_per_player": clue_count,
-            "minimum_global_clues": len(names) * clue_count,
+            "clue_count_per_player": max(
+                1,
+                clue_count,
+            ),
             "language": "Nederlands",
+            "critical_role_rules": [
+                "Er mag NOOIT meer dan één Boss zijn.",
+                "De backend bepaalt uiteindelijk de rolverdeling.",
+                "Gebruik uitsluitend rollen uit available_roles.",
+                "Gebruik iedere player_id exact één keer.",
+                "Gebruik de aangeleverde namen exact.",
+                "Markeer alleen echte saboteurs met is_saboteur=true.",
+                "Geef iedere speler unieke persoonlijke informatie.",
+                "Geef iedere speler minimaal clue_count_per_player persoonlijke clues.",
+                "Geef minimaal één Boss.",
+                "Geef minimaal één saboteur.",
+            ],
         }
 
         system_prompt = """
-You are a professional tabletop game designer.
+Je bent een professionele tabletop game designer.
 
-Return ONLY one valid JSON object.
-Never return markdown.
-Never return code fences.
+Genereer uitsluitend één geldig JSON-object.
+Gebruik GEEN markdown.
+Gebruik GEEN code fences.
+Gebruik GEEN uitleg buiten JSON.
 
-STRICT SCHEMA RULES:
+ZEER BELANGRIJK:
 
-- player_id MUST be a string.
-- Player IDs MUST be sequential: "1", "2", "3", etc.
-- Generate exactly one player per requested name.
-- Preserve the requested player names exactly.
-- role MUST come from available_roles.
-- relationships MUST be an array of strings.
-- personal_objectives MUST be an array of objects.
-- objective metric MUST be one of:
-  vote_received,
-  top_suspect,
-  not_top_suspect,
-  mutual_suspicion,
-  theory_adopted,
-  vote_change,
-  clue_found,
-  manual_review.
-- activate_phase MUST be an integer.
-- phases MUST use integer number values.
-- events MUST use integer phase values.
-- voting_moments MUST use integer phase values.
-- clues MUST use integer release_phase values.
-- Never use phase names as phase references.
-- Use "id", never phase_id/event_id/voting_id/clue_id.
-- Event title field is "title".
-- Voting question field is "question".
-- Clue text field is "text".
-- clue_type MUST be one of:
-  direct,
-  indirect,
-  relational,
-  timeline,
-  alibi,
-  location,
-  object,
-  witness,
-  confirming,
-  crucial,
-  red_herring,
-  personal.
-- visibility MUST be:
-  public,
-  private,
-  shareable.
-- Every player MUST have at least the requested number of clues.
-- Every global clue MUST have:
-  id,
-  text,
-  clue_type,
-  owner_player_id,
-  release_phase,
-  visibility,
-  supports,
-  dependencies,
-  red_herring.
-- supports MUST contain at least one string.
-- Every event MUST contain at least one player_id.
-- Every phase MUST contain at least one objective.
-- All player-facing text MUST be Dutch.
+1. player_id moet exact overeenkomen met de aangeleverde IDs.
+2. name moet exact overeenkomen met de aangeleverde namen.
+3. role moet een rol uit available_roles zijn.
+4. Geef nooit meerdere spelers de rol Boss.
+5. Geef iedere speler een betekenisvolle eigen rol.
+6. Geef iedere speler eigen geheime informatie.
+7. Geef iedere speler minimaal het gevraagde aantal clues.
+8. Clues mogen niet allemaal exact hetzelfde zijn.
+9. relationships is altijd een array van strings.
+10. personal_objectives is altijd een array van objecten.
+11. phases gebruiken alleen gehele getallen.
+12. events gebruiken alleen gehele phase-nummers.
+13. voting_moments gebruiken alleen gehele phase-nummers.
+14. clues gebruiken alleen gehele release_phase-nummers.
+15. clue_type moet één van de toegestane clue types zijn.
+16. supports moet minimaal één item bevatten.
+17. Alle spelergerichte tekst is Nederlands.
+
+De uiteindelijke rolverdeling wordt door de backend gecontroleerd en
+indien nodig gecorrigeerd. Probeer daarom zelf ook een logische,
+gebalanceerde rolverdeling te maken.
 """
 
         body = {
@@ -367,10 +327,19 @@ STRICT SCHEMA RULES:
                                     "voting_moments",
                                     "clues",
                                 ],
-                                "minimum_player_clues": clue_count,
-                                "minimum_global_clues": (
-                                    len(names) * clue_count
-                                ),
+                                "player_required_fields": [
+                                    "player_id",
+                                    "name",
+                                    "role",
+                                    "role_description",
+                                    "objective",
+                                    "personal_objectives",
+                                    "secret_information",
+                                    "clues",
+                                    "relationships",
+                                    "instructions",
+                                    "is_saboteur",
+                                ],
                             },
                         },
                         ensure_ascii=False,
@@ -396,6 +365,7 @@ STRICT SCHEMA RULES:
                 async with httpx.AsyncClient(
                     timeout=60
                 ) as client:
+
                     response = await client.post(
                         (
                             f"{settings.ai_base_url.rstrip('/')}"
@@ -416,30 +386,34 @@ STRICT SCHEMA RULES:
                         .get("content")
                     )
 
-                    if not isinstance(content, str):
+                    if not isinstance(
+                        content,
+                        str,
+                    ):
                         raise ValueError(
-                            "AI returned no textual JSON content."
+                            "AI returned invalid message content."
                         )
 
                     raw = json.loads(content)
-
-                    if not isinstance(raw, dict):
-                        raise ValueError(
-                            "AI output must be a JSON object."
-                        )
 
                     raw = _normalize_generation(
                         raw,
                         names=names,
                         game=game,
                         clue_count=clue_count,
-                        difficulty=difficulty,
-                        duration=duration,
                     )
 
-                    generated = (
-                        GeneratedGame.model_validate(raw)
-                    )
+                    if hasattr(
+                        GeneratedGame,
+                        "model_validate",
+                    ):
+                        generated = (
+                            GeneratedGame.model_validate(raw)
+                        )
+                    else:
+                        generated = (
+                            GeneratedGame.parse_obj(raw)
+                        )
 
                     _validate_generation(
                         generated,
@@ -454,8 +428,7 @@ STRICT SCHEMA RULES:
 
             except ValidationError as exc:
                 logger.error(
-                    "AI generation validation failed "
-                    "on attempt %s: %s",
+                    "AI validation failed attempt %s: %s",
                     attempt,
                     exc.errors(),
                 )
@@ -488,18 +461,81 @@ STRICT SCHEMA RULES:
                 json.JSONDecodeError,
             ) as exc:
                 logger.exception(
-                    "AI game generation failed "
-                    "on attempt %s",
+                    "AI generation failed attempt %s",
                     attempt,
                 )
                 last_error = exc
 
             if attempt < 3:
-                await asyncio.sleep(0.75 * attempt)
+                await asyncio.sleep(
+                    0.75 * attempt
+                )
 
         raise RuntimeError(
             f"AI_GAME_GENERATION_FAILED: {last_error}"
         ) from last_error
+
+
+# ============================================================
+# NORMALIZATION
+# ============================================================
+
+
+def _phase_number(
+    value: Any,
+    phases: list[dict[str, Any]],
+) -> int:
+
+    if isinstance(value, int):
+        return max(1, value)
+
+    if isinstance(value, float):
+        return max(1, int(value))
+
+    if isinstance(value, str):
+        value_lower = value.lower().strip()
+
+        if value_lower.isdigit():
+            return max(
+                1,
+                int(value_lower),
+            )
+
+        for index, phase in enumerate(
+            phases,
+            start=1,
+        ):
+            if not isinstance(
+                phase,
+                dict,
+            ):
+                continue
+
+            possible_values = {
+                str(
+                    phase.get(
+                        "phase_id",
+                        "",
+                    )
+                ).lower(),
+                str(
+                    phase.get(
+                        "id",
+                        "",
+                    )
+                ).lower(),
+                str(
+                    phase.get(
+                        "name",
+                        "",
+                    )
+                ).lower(),
+            }
+
+            if value_lower in possible_values:
+                return index
+
+    return 1
 
 
 def _normalize_generation(
@@ -508,379 +544,44 @@ def _normalize_generation(
     names: list[str],
     game: dict[str, Any],
     clue_count: int,
-    difficulty: str,
-    duration: str,
 ) -> dict[str, Any]:
-    """
-    Convert flexible AI JSON into the exact internal schema.
 
-    This function is intentionally defensive. AI output is treated
-    as untrusted input and normalized before Pydantic validation.
-    """
-
-    if not isinstance(raw, dict):
+    if not isinstance(
+        raw,
+        dict,
+    ):
         raise ValueError(
             "AI output must be a JSON object."
         )
 
-    player_ids = [
-        str(index + 1)
-        for index in range(len(names))
-    ]
+    # --------------------------------------------------------
+    # PHASES
+    # --------------------------------------------------------
 
-    phases = _normalize_phases(
-        raw.get("phases"),
-        duration,
+    phases = raw.get(
+        "phases",
+        [],
     )
 
-    phase_numbers = {
-        phase["number"]
-        for phase in phases
-    }
-
-    # ---------------------------------------------------------
-    # PLAYERS
-    # ---------------------------------------------------------
-
-    raw_players = raw.get("players")
-
-    if not isinstance(raw_players, list):
-        raw_players = []
-
-    players_by_id: dict[str, dict[str, Any]] = {}
-
-    for index, player in enumerate(raw_players):
-        if not isinstance(player, dict):
-            continue
-
-        requested_id = str(
-            player.get(
-                "player_id",
-                index + 1,
-            )
-        )
-
-        if requested_id not in player_ids:
-            requested_id = (
-                str(index + 1)
-                if index < len(names)
-                else ""
-            )
-
-        if requested_id:
-            players_by_id[requested_id] = player
-
-    normalized_players = []
-
-    for index, player_id in enumerate(player_ids):
-        player = players_by_id.get(
-            player_id,
-            {},
-        )
-
-        player_name = names[index]
-
-        relationships = _normalize_string_list(
-            player.get("relationships"),
-        )
-
-        personal_objectives = _normalize_objectives(
-            player.get("personal_objectives"),
-            player_id,
-            phases,
-        )
-
-        if not personal_objectives:
-            personal_objectives = [
-                {
-                    "id": (
-                        f"{player_id}-objective-1"
-                    ),
-                    "text": str(
-                        player.get(
-                            "objective",
-                            "Bereik je persoonlijke doel.",
-                        )
-                    ),
-                    "owner_player_id": player_id,
-                    "measurable": False,
-                    "metric": "manual_review",
-                    "target_player_id": None,
-                    "target_value": None,
-                    "activate_phase": 1,
-                }
-            ]
-
-        raw_player_clues = _extract_clue_texts(
-            player.get("clues")
-        )
-
-        normalized_players.append(
-            {
-                "player_id": player_id,
-                "name": player_name,
-                "role": str(
-                    player.get(
-                        "role",
-                        _default_role(game),
-                    )
-                ),
-                "role_description": str(
-                    player.get(
-                        "role_description",
-                        player.get(
-                            "description",
-                            "",
-                        ),
-                    )
-                ),
-                "objective": str(
-                    player.get(
-                        "objective",
-                        "Bereik je persoonlijke doel.",
-                    )
-                ),
-                "personal_objectives": personal_objectives,
-                "secret_information": str(
-                    player.get(
-                        "secret_information",
-                        player.get(
-                            "secret",
-                            "",
-                        ),
-                    )
-                ),
-                "clues": raw_player_clues,
-                "relationships": relationships,
-                "instructions": str(
-                    player.get(
-                        "instructions",
-                        "",
-                    )
-                ),
-                "is_saboteur": bool(
-                    player.get(
-                        "is_saboteur",
-                        False,
-                    )
-                ),
-            }
-        )
-
-    # ---------------------------------------------------------
-    # GLOBAL CLUES
-    # ---------------------------------------------------------
-
-    normalized_clues = _normalize_global_clues(
-        raw.get("clues"),
-        names=names,
-        phases=phases,
-        clue_count=clue_count,
-        player_data=normalized_players,
-    )
-
-    # Ensure every player has enough clue text.
-    clue_texts_by_player: dict[str, list[str]] = {
-        player_id: []
-        for player_id in player_ids
-    }
-
-    for clue in normalized_clues:
-        owner = clue["owner_player_id"]
-
-        if owner in clue_texts_by_player:
-            clue_texts_by_player[owner].append(
-                clue["text"]
-            )
-
-    # Use globally generated clues as fallback,
-    # then create deterministic clues if necessary.
-    fallback_texts = [
-        clue["text"]
-        for clue in normalized_clues
-        if clue.get("text")
-    ]
-
-    for player in normalized_players:
-        player_id = player["player_id"]
-        clues = list(player["clues"])
-
-        for text in clue_texts_by_player.get(
-            player_id,
-            [],
-        ):
-            if text not in clues:
-                clues.append(text)
-
-        for text in fallback_texts:
-            if len(clues) >= clue_count:
-                break
-
-            if text not in clues:
-                clues.append(text)
-
-        while len(clues) < clue_count:
-            clues.append(
-                _fallback_clue_text(
-                    player_id,
-                    len(clues) + 1,
-                )
-            )
-
-        player["clues"] = clues[:max(2, clue_count)]
-
-    # ---------------------------------------------------------
-    # EVENTS
-    # ---------------------------------------------------------
-
-    normalized_events = _normalize_events(
-        raw.get("events"),
+    if not isinstance(
         phases,
-        player_ids,
-    )
+        list,
+    ):
+        phases = []
 
-    # ---------------------------------------------------------
-    # VOTING
-    # ---------------------------------------------------------
-
-    normalized_votes = _normalize_votes(
-        raw.get("voting_moments"),
-        phases,
-        duration,
-    )
-
-    # ---------------------------------------------------------
-    # SABOTEUR COUNT
-    # ---------------------------------------------------------
-
-    saboteur_count = sum(
-        1
-        for player in normalized_players
-        if player["is_saboteur"]
-    )
-
-    if saboteur_count < 1:
-        # Make player 2 the default saboteur if possible.
-        saboteur_index = (
-            1
-            if len(normalized_players) > 1
-            else 0
-        )
-
-        normalized_players[
-            saboteur_index
-        ]["is_saboteur"] = True
-
-        saboteur_count = 1
-
-    # ---------------------------------------------------------
-    # TOP-LEVEL GAME
-    # ---------------------------------------------------------
-
-    raw["game_id"] = game["id"]
-    raw["game_name"] = game["name"]
-
-    raw["title"] = str(
-        raw.get(
-            "title",
-            game["name"],
-        )
-    )
-
-    raw["story"] = str(
-        raw.get(
-            "story",
-            "Een spannend spel waarin de spelers "
-            "moeten samenwerken terwijl niet iedereen "
-            "dezelfde agenda heeft.",
-        )
-    )
-
-    raw["objective"] = str(
-        raw.get(
-            "objective",
-            game.get(
-                "goal",
-                "Voltooi het spel.",
-            ),
-        )
-    )
-
-    raw["rules"] = _string_list(
-        raw.get("rules")
-    )
-
-    raw["players"] = normalized_players
-
-    raw["solution"] = str(
-        raw.get(
-            "solution",
-            "De waarheid moet door de spelers "
-            "worden ontdekt.",
-        )
-    )
-
-    raw["difficulty"] = difficulty
-    raw["duration"] = duration
-
-    raw["saboteur_count"] = saboteur_count
-
-    raw["team_win_condition"] = str(
-        raw.get(
-            "team_win_condition",
-            "Voltooi het gezamenlijke doel.",
-        )
-    )
-
-    raw["individual_win_condition"] = str(
-        raw.get(
-            "individual_win_condition",
-            "Bereik je persoonlijke doel.",
-        )
-    )
-
-    raw["saboteur_win_condition"] = str(
-        raw.get(
-            "saboteur_win_condition",
-            "Saboteer het team zonder ontmaskerd te worden.",
-        )
-    )
-
-    raw["truth_model"] = str(
-        raw.get(
-            "truth_model",
-            "De oplossing wordt bepaald door de "
-            "geheime informatie en clues.",
-        )
-    )
-
-    raw["phases"] = phases
-    raw["events"] = normalized_events
-    raw["voting_moments"] = normalized_votes
-    raw["clues"] = normalized_clues
-
-    return raw
-
-
-def _normalize_phases(
-    raw_phases: Any,
-    duration: str,
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_phases, list):
-        raw_phases = []
-
-    minimum = _minimum_phases(duration)
-
-    phases: list[dict[str, Any]] = []
+    normalized_phases = []
 
     for index, phase in enumerate(
-        raw_phases,
+        phases,
         start=1,
     ):
-        if not isinstance(phase, dict):
+        if not isinstance(
+            phase,
+            dict,
+        ):
             continue
 
-        name = str(
+        phase_name = str(
             phase.get(
                 "name",
                 phase.get(
@@ -891,30 +592,38 @@ def _normalize_phases(
                     ),
                 ),
             )
-        )
+        ).strip()
 
-        phases.append(
+        if not phase_name:
+            phase_name = f"Fase {index}"
+
+        normalized_phases.append(
             {
                 "number": index,
-                "name": name,
+                "name": phase_name,
                 "purpose": str(
                     phase.get(
                         "purpose",
                         phase.get(
                             "description",
-                            "Onderzoek de situatie.",
+                            phase.get(
+                                "goal",
+                                "Onderzoek de situatie.",
+                            ),
                         ),
                     )
-                ),
+                ).strip()
+                or "Onderzoek de situatie.",
                 "open_question": str(
                     phase.get(
                         "open_question",
                         phase.get(
                             "question",
-                            "Wat is hier echt aan de hand?",
+                            "Wat is hier werkelijk gebeurd?",
                         ),
                     )
-                ),
+                ).strip()
+                or "Wat is hier werkelijk gebeurd?",
                 "release_after_days": max(
                     0,
                     _safe_int(
@@ -931,7 +640,7 @@ def _normalize_phases(
                         phase.get(
                             "goals",
                             [
-                                "Verzamel informatie."
+                                "Onderzoek de situatie."
                             ],
                         ),
                     )
@@ -939,494 +648,651 @@ def _normalize_phases(
             }
         )
 
-    while len(phases) < minimum:
-        index = len(phases) + 1
-
-        phases.append(
+    if not normalized_phases:
+        normalized_phases = [
             {
-                "number": index,
-                "name": _default_phase_name(index),
-                "purpose": _default_phase_purpose(index),
+                "number": 1,
+                "name": "Start",
+                "purpose": (
+                    "Verzamel de eerste informatie."
+                ),
                 "open_question": (
-                    "Welke informatie ontbreekt nog?"
+                    "Wat is er gebeurd?"
                 ),
-                "release_after_days": (
-                    _default_phase_day(
-                        index,
-                        duration,
-                    )
-                ),
+                "release_after_days": 0,
                 "objectives": [
-                    "Verzamel informatie.",
-                    "Werk samen met de andere spelers.",
+                    "Verzamel informatie."
                 ],
             }
+        ]
+
+    raw["phases"] = normalized_phases
+
+    # --------------------------------------------------------
+    # PLAYERS
+    # --------------------------------------------------------
+
+    players = raw.get(
+        "players",
+        [],
+    )
+
+    if not isinstance(
+        players,
+        list,
+    ):
+        players = []
+
+    # Maak een map op player_id zodat ontbrekende AI spelers
+    # later automatisch kunnen worden toegevoegd.
+    players_by_id: dict[str, dict[str, Any]] = {}
+
+    for index, player in enumerate(
+        players
+    ):
+        if not isinstance(
+            player,
+            dict,
+        ):
+            continue
+
+        player_id = str(
+            player.get(
+                "player_id",
+                index + 1,
+            )
         )
 
-    return phases
+        players_by_id[player_id] = player
 
+    normalized_players = []
 
-def _normalize_global_clues(
-    raw_clues: Any,
-    *,
-    names: list[str],
-    phases: list[dict[str, Any]],
-    clue_count: int,
-    player_data: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_clues, list):
-        raw_clues = []
-
-    normalized: list[dict[str, Any]] = []
-
-    for index, clue in enumerate(
-        raw_clues,
+    for index, name in enumerate(
+        names,
         start=1,
     ):
-        # AI kan een clue als string teruggeven.
-        if isinstance(clue, str):
-            text = clue.strip()
+        player_id = str(index)
 
-            if not text:
-                continue
+        player = players_by_id.get(
+            player_id,
+            {},
+        )
 
-            owner = (
-                str(
-                    ((index - 1) % len(names)) + 1
+        player_name = name
+
+        relationships = _normalize_relationships(
+            player.get(
+                "relationships",
+                [],
+            )
+        )
+
+        clues = _normalize_player_clues(
+            player.get(
+                "clues",
+                [],
+            )
+        )
+
+        # Niet zomaar dezelfde globale clues kopiëren.
+        # We maken ontbrekende persoonlijke clues.
+        while len(clues) < max(
+            2,
+            clue_count,
+        ):
+            clues.append(
+                _fallback_personal_clue(
+                    player_id,
+                    len(clues) + 1,
                 )
-                if names
-                else "1"
             )
 
-            normalized.append(
-                _make_clue(
-                    clue_id=f"clue-{index}",
-                    text=text,
-                    owner_player_id=owner,
-                    phase=1,
-                    clue_type="direct",
-                    visibility="public",
-                    supports=["solution"],
-                )
+        objectives = _normalize_objectives(
+            player.get(
+                "personal_objectives",
+                [],
+            ),
+            player_id,
+            normalized_phases,
+        )
+
+        role = str(
+            player.get(
+                "role",
+                "",
             )
+        ).strip()
 
-            continue
+        role_description = str(
+            player.get(
+                "role_description",
+                "",
+            )
+        ).strip()
 
-        if not isinstance(clue, dict):
-            continue
+        objective = str(
+            player.get(
+                "objective",
+                "",
+            )
+        ).strip()
 
-        text = str(
-            clue.get(
-                "text",
-                clue.get(
-                    "description",
-                    clue.get(
-                        "clue",
-                        "",
-                    ),
+        secret_information = str(
+            player.get(
+                "secret_information",
+                player.get(
+                    "secret",
+                    "",
                 ),
             )
         ).strip()
 
-        if not text:
-            continue
-
-        owner = str(
-            clue.get(
-                "owner_player_id",
-                clue.get(
-                    "owner",
-                    "1",
-                ),
+        instructions = str(
+            player.get(
+                "instructions",
+                "",
             )
-        )
+        ).strip()
 
-        if not owner.isdigit():
-            owner = "1"
-
-        if int(owner) < 1 or int(owner) > len(names):
-            owner = "1"
-
-        phase = _phase_number(
-            clue.get(
-                "release_phase",
-                clue.get(
-                    "phase",
-                    clue.get(
-                        "phase_id",
-                        1,
-                    ),
-                ),
-            ),
-            phases,
-        )
-
-        clue_type = _normalize_clue_type(
-            clue.get(
-                "clue_type",
-                "direct",
+        if not objective:
+            objective = (
+                "Bereik je persoonlijke doel."
             )
-        )
 
-        supports = _normalize_string_list(
-            clue.get("supports")
-        )
+        if not role_description:
+            role_description = (
+                "Speel je rol en gebruik je "
+                "informatie verstandig."
+            )
 
-        if not supports:
-            supports = ["solution"]
+        if not secret_information:
+            secret_information = (
+                "Je beschikt over informatie die "
+                "niet iedereen kent."
+            )
 
-        dependencies = _normalize_string_list(
-            clue.get("dependencies")
-        )
+        if not instructions:
+            instructions = (
+                "Werk samen, maar bepaal zelf "
+                "welke informatie je deelt."
+            )
 
-        normalized.append(
-            _make_clue(
-                clue_id=str(
-                    clue.get(
-                        "id",
-                        clue.get(
-                            "clue_id",
-                            f"clue-{index}",
-                        ),
-                    )
-                ),
-                text=text,
-                owner_player_id=owner,
-                phase=phase,
-                clue_type=clue_type,
-                visibility=_normalize_visibility(
-                    clue.get(
-                        "visibility",
-                        "public",
-                    )
-                ),
-                supports=supports,
-                dependencies=dependencies,
-                red_herring=bool(
-                    clue.get(
-                        "red_herring",
+        normalized_players.append(
+            {
+                "player_id": player_id,
+                "name": player_name,
+                "role": role,
+                "role_description": role_description,
+                "objective": objective,
+                "personal_objectives": objectives,
+                "secret_information": secret_information,
+                "clues": clues,
+                "relationships": relationships,
+                "instructions": instructions,
+                "is_saboteur": bool(
+                    player.get(
+                        "is_saboteur",
                         False,
                     )
                 ),
-            )
+            }
         )
 
-    # ---------------------------------------------------------
-    # DEDUPE IDs
-    # ---------------------------------------------------------
+    raw["players"] = normalized_players
 
-    seen_ids: set[str] = set()
+    # --------------------------------------------------------
+    # CRUCIALE FIX:
+    # ROLLEN WORDEN HIER AFGEDWONGEN.
+    # --------------------------------------------------------
 
-    for clue in normalized:
-        original_id = clue["id"]
-        clue_id = original_id
-        suffix = 2
+    _repair_role_distribution(
+        raw["players"],
+        game,
+    )
 
-        while clue_id in seen_ids:
-            clue_id = (
-                f"{original_id}-{suffix}"
+    # --------------------------------------------------------
+    # EVENTS
+    # --------------------------------------------------------
+
+    raw["events"] = _normalize_events(
+        raw.get(
+            "events",
+            [],
+        ),
+        normalized_phases,
+        len(names),
+    )
+
+    # --------------------------------------------------------
+    # VOTING
+    # --------------------------------------------------------
+
+    raw["voting_moments"] = (
+        _normalize_voting_moments(
+            raw.get(
+                "voting_moments",
+                [],
+            ),
+            normalized_phases,
+        )
+    )
+
+    # --------------------------------------------------------
+    # GLOBAL CLUES
+    # --------------------------------------------------------
+
+    raw["clues"] = _normalize_global_clues(
+        raw.get(
+            "clues",
+            [],
+        ),
+        names,
+        normalized_phases,
+        clue_count,
+    )
+
+    # --------------------------------------------------------
+    # Globale clues moeten daadwerkelijk bij spelers horen.
+    # --------------------------------------------------------
+
+    _ensure_player_clues_are_unique(
+        raw["players"],
+        raw["clues"],
+        clue_count,
+    )
+
+    return raw
+
+
+# ============================================================
+# ROLE REPAIR
+# ============================================================
+
+
+def _repair_role_distribution(
+    players: list[dict[str, Any]],
+    game: dict[str, Any],
+) -> None:
+
+    roles = [
+        role
+        for role in game.get(
+            "roles",
+            [],
+        )
+        if isinstance(
+            role,
+            dict,
+        )
+    ]
+
+    role_names = [
+        str(
+            role.get(
+                "name",
+                "",
             )
-            suffix += 1
+        ).strip()
+        for role in roles
+    ]
 
-        clue["id"] = clue_id
-        seen_ids.add(clue_id)
+    role_names = [
+        role
+        for role in role_names
+        if role
+    ]
 
-    # ---------------------------------------------------------
-    # GUARANTEE ENOUGH GLOBAL CLUES
-    #
-    # The old version checked for 21 clues but never created
-    # them. This is the actual fix.
-    # ---------------------------------------------------------
-
-    minimum_global = len(names) * clue_count
-
-    source_clues = list(normalized)
-
-    while len(normalized) < minimum_global:
-        index = len(normalized) + 1
-
-        owner = (
-            ((index - 1) % len(names)) + 1
-            if names
-            else 1
+    if not role_names:
+        raise ValueError(
+            "Geen geldige rollen gevonden."
         )
 
-        source = (
-            source_clues[
-                (index - 1) % len(source_clues)
-            ]
-            if source_clues
-            else None
+    # Case-insensitive zoeken.
+    boss_role = _find_role(
+        role_names,
+        "boss",
+    )
+
+    saboteur_role = (
+        _find_role(
+            role_names,
+            "double agent",
         )
-
-        if source:
-            text = source["text"]
-            clue_type = source["clue_type"]
-            visibility = source["visibility"]
-            supports = list(
-                source["supports"]
-            )
-        else:
-            text = _fallback_clue_text(
-                str(owner),
-                ((index - 1) % clue_count) + 1,
-            )
-            clue_type = "direct"
-            visibility = "public"
-            supports = ["solution"]
-
-        normalized.append(
-            _make_clue(
-                clue_id=f"clue-{index}",
-                text=text,
-                owner_player_id=str(owner),
-                phase=1,
-                clue_type=clue_type,
-                visibility=visibility,
-                supports=supports,
-            )
+        or _find_role(
+            role_names,
+            "saboteur",
         )
-
-    # ---------------------------------------------------------
-    # Make sure every generated clue has a valid owner.
-    # ---------------------------------------------------------
-
-    valid_ids = {
-        str(index + 1)
-        for index in range(len(names))
-    }
-
-    for clue in normalized:
-        if clue["owner_player_id"] not in valid_ids:
-            clue["owner_player_id"] = "1"
-
-        if clue["release_phase"] not in {
-            phase["number"]
-            for phase in phases
-        }:
-            clue["release_phase"] = 1
-
-    return normalized
-
-
-def _normalize_events(
-    raw_events: Any,
-    phases: list[dict[str, Any]],
-    player_ids: list[str],
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_events, list):
-        raw_events = []
-
-    result = []
-
-    for index, event in enumerate(
-        raw_events,
-        start=1,
-    ):
-        if not isinstance(event, dict):
-            continue
-
-        ids = _normalize_string_list(
-            event.get("player_ids")
+        or _find_role(
+            role_names,
+            "traitor",
         )
+    )
 
-        ids = [
-            player_id
-            for player_id in ids
-            if player_id in player_ids
+    # --------------------------------------------------------
+    # BOSS
+    # --------------------------------------------------------
+
+    # Altijd speler 1 als Boss.
+    # Hierdoor kan de AI nooit 7 bosses teruggeven.
+    if boss_role:
+        players[0]["role"] = boss_role
+
+        for player in players[1:]:
+            if _same_role(
+                player.get(
+                    "role",
+                    "",
+                ),
+                boss_role,
+            ):
+                player["role"] = ""
+
+    # --------------------------------------------------------
+    # SABOTEURS
+    # --------------------------------------------------------
+
+    if saboteur_role:
+        requested_saboteurs = [
+            player
+            for player in players
+            if player.get(
+                "is_saboteur",
+                False,
+            )
         ]
 
-        if not ids:
-            ids = [
-                player_ids[
-                    (index - 1) % len(player_ids)
-                ]
+        # Boss mag niet automatisch saboteur worden.
+        requested_saboteurs = [
+            player
+            for player in requested_saboteurs
+            if player["player_id"] != "1"
+        ]
+
+        # Als AI geen saboteur markeerde, kies speler 2.
+        if not requested_saboteurs and len(players) >= 2:
+            requested_saboteurs = [
+                players[1]
             ]
 
-        result.append(
-            {
-                "id": str(
-                    event.get(
-                        "id",
-                        event.get(
-                            "event_id",
-                            f"event-{index}",
-                        ),
-                    )
-                ),
-                "phase": _phase_number(
-                    event.get(
-                        "phase",
-                        event.get(
-                            "phase_id",
-                            1,
-                        ),
-                    ),
-                    phases,
-                ),
-                "title": str(
-                    event.get(
-                        "title",
-                        event.get(
-                            "name",
-                            f"Event {index}",
-                        ),
-                    )
-                ),
-                "description": str(
-                    event.get(
-                        "description",
-                        event.get(
-                            "details",
-                            "Er gebeurt iets belangrijks.",
-                        ),
-                    )
-                ),
-                "delivery": _normalize_delivery(
-                    event.get(
-                        "delivery",
-                        "website",
-                    )
-                ),
-                "release_after_days": max(
-                    0,
-                    _safe_int(
-                        event.get(
-                            "release_after_days",
-                            0,
-                        ),
-                        0,
-                    ),
-                ),
-                "player_ids": ids,
-            }
+        for player in players:
+            player["is_saboteur"] = False
+
+        for player in requested_saboteurs:
+            player["is_saboteur"] = True
+            player["role"] = saboteur_role
+
+    # --------------------------------------------------------
+    # OVERIGE ROLLEN
+    # --------------------------------------------------------
+
+    non_special_roles = [
+        role
+        for role in role_names
+        if not (
+            boss_role
+            and _same_role(
+                role,
+                boss_role,
+            )
         )
+        and not (
+            saboteur_role
+            and _same_role(
+                role,
+                saboteur_role,
+            )
+        )
+    ]
 
-    return result
+    if not non_special_roles:
+        non_special_roles = [
+            role
+            for role in role_names
+            if not (
+                boss_role
+                and _same_role(
+                    role,
+                    boss_role,
+                )
+            )
+        ]
 
+    role_index = 0
 
-def _normalize_votes(
-    raw_votes: Any,
-    phases: list[dict[str, Any]],
-    duration: str,
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_votes, list):
-        raw_votes = []
-
-    result = []
-
-    for index, voting in enumerate(
-        raw_votes,
-        start=1,
-    ):
-        if not isinstance(voting, dict):
+    for player in players:
+        if (
+            boss_role
+            and player["player_id"] == "1"
+        ):
             continue
 
-        result.append(
-            {
-                "id": str(
-                    voting.get(
-                        "id",
-                        voting.get(
-                            "voting_id",
-                            f"vote-{index}",
-                        ),
-                    )
-                ),
-                "phase": _phase_number(
-                    voting.get(
-                        "phase",
-                        voting.get(
-                            "phase_id",
-                            1,
-                        ),
-                    ),
-                    phases,
-                ),
-                "question": str(
-                    voting.get(
-                        "question",
-                        voting.get(
-                            "name",
-                            "Wie verdenken jullie?",
-                        ),
-                    )
-                ),
-                "release_after_days": max(
-                    0,
-                    _safe_int(
-                        voting.get(
-                            "release_after_days",
-                            0,
-                        ),
-                        0,
-                    ),
-                ),
-                "duration_hours": max(
-                    1,
-                    min(
-                        168,
-                        _safe_int(
-                            voting.get(
-                                "duration_hours",
-                                24,
-                            ),
-                            24,
-                        ),
-                    ),
-                ),
-            }
+        if player.get(
+            "is_saboteur",
+            False,
+        ):
+            continue
+
+        current_role = str(
+            player.get(
+                "role",
+                "",
+            )
+        ).strip()
+
+        valid_current = (
+            current_role in role_names
+            and not (
+                boss_role
+                and _same_role(
+                    current_role,
+                    boss_role,
+                )
+            )
+            and not (
+                saboteur_role
+                and _same_role(
+                    current_role,
+                    saboteur_role,
+                )
+            )
         )
 
-    minimum_votes = _minimum_votes(duration)
-
-    while len(result) < minimum_votes:
-        index = len(result) + 1
-
-        phase = min(
-            index,
-            len(phases),
-        )
-
-        result.append(
-            {
-                "id": f"vote-{index}",
-                "phase": phase,
-                "question": (
-                    "Wie verdenken jullie op dit moment?"
-                    if index == 1
-                    else "Is jullie verdenking veranderd?"
-                ),
-                "release_after_days": (
-                    phases[phase - 1][
-                        "release_after_days"
+        if not valid_current:
+            if non_special_roles:
+                player["role"] = (
+                    non_special_roles[
+                        role_index
+                        % len(non_special_roles)
                     ]
-                ),
-                "duration_hours": 24,
-            }
-        )
+                )
+                role_index += 1
+            else:
+                player["role"] = role_names[
+                    min(
+                        role_index,
+                        len(role_names) - 1,
+                    )
+                ]
+                role_index += 1
 
-    return result
+
+def _find_role(
+    roles: list[str],
+    wanted: str,
+) -> str | None:
+
+    wanted = wanted.lower().strip()
+
+    for role in roles:
+        if role.lower().strip() == wanted:
+            return role
+
+    return None
 
 
-def _normalize_objectives(
-    raw_objectives: Any,
-    player_id: str,
-    phases: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    if isinstance(raw_objectives, dict):
-        raw_objectives = [raw_objectives]
+def _same_role(
+    first: Any,
+    second: Any,
+) -> bool:
 
-    if not isinstance(raw_objectives, list):
+    return (
+        str(first).strip().lower()
+        == str(second).strip().lower()
+    )
+
+
+# ============================================================
+# PLAYER CLUES
+# ============================================================
+
+
+def _normalize_player_clues(
+    value: Any,
+) -> list[str]:
+
+    if isinstance(
+        value,
+        str,
+    ):
+        return [
+            value.strip()
+        ] if value.strip() else []
+
+    if not isinstance(
+        value,
+        list,
+    ):
         return []
 
     result = []
 
+    for item in value:
+        if isinstance(
+            item,
+            dict,
+        ):
+            text = item.get(
+                "text",
+                item.get(
+                    "description",
+                    "",
+                ),
+            )
+        else:
+            text = item
+
+        text = str(
+            text
+        ).strip()
+
+        if text and text not in result:
+            result.append(text)
+
+    return result
+
+
+def _fallback_personal_clue(
+    player_id: str,
+    number: int,
+) -> str:
+
+    return (
+        f"Persoonlijke observatie van speler "
+        f"{player_id}: je hebt informatie die "
+        f"later relevant kan zijn voor het onderzoek "
+        f"(clue {number})."
+    )
+
+
+def _ensure_player_clues_are_unique(
+    players: list[dict[str, Any]],
+    global_clues: list[dict[str, Any]],
+    clue_count: int,
+) -> None:
+
+    minimum = max(
+        2,
+        clue_count,
+    )
+
+    for player in players:
+        clues = _normalize_player_clues(
+            player.get(
+                "clues",
+                [],
+            )
+        )
+
+        while len(clues) < minimum:
+            clues.append(
+                _fallback_personal_clue(
+                    player["player_id"],
+                    len(clues) + 1,
+                )
+            )
+
+        player["clues"] = clues
+
+
+# ============================================================
+# OBJECTIVES
+# ============================================================
+
+
+def _normalize_objectives(
+    objectives: Any,
+    player_id: str,
+    phases: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+
+    if isinstance(
+        objectives,
+        dict,
+    ):
+        objectives = [
+            objectives
+        ]
+
+    if not isinstance(
+        objectives,
+        list,
+    ):
+        objectives = []
+
+    normalized = []
+
+    allowed_metrics = {
+        "vote_received",
+        "top_suspect",
+        "not_top_suspect",
+        "mutual_suspicion",
+        "theory_adopted",
+        "vote_change",
+        "clue_found",
+        "manual_review",
+    }
+
+    metric_map = {
+        "clues": "clue_found",
+        "clue": "clue_found",
+        "find_clue": "clue_found",
+        "votes": "vote_received",
+        "vote": "vote_received",
+        "suspected": "top_suspect",
+        "avoid_suspicion": "not_top_suspect",
+        "theory": "theory_adopted",
+        "change_vote": "vote_change",
+        "manual": "manual_review",
+    }
+
     for index, objective in enumerate(
-        raw_objectives,
+        objectives,
         start=1,
     ):
-        if not isinstance(objective, dict):
+        if not isinstance(
+            objective,
+            dict,
+        ):
             continue
 
         metric = str(
@@ -1436,58 +1302,41 @@ def _normalize_objectives(
             )
         ).lower().strip()
 
-        metric_map = {
-            "clues": "clue_found",
-            "clue": "clue_found",
-            "find_clue": "clue_found",
-            "votes": "vote_received",
-            "vote": "vote_received",
-            "suspected": "top_suspect",
-            "avoid_suspicion": "not_top_suspect",
-            "theory": "theory_adopted",
-            "change_vote": "vote_change",
-            "manual": "manual_review",
-        }
-
         metric = metric_map.get(
             metric,
             metric,
         )
 
-        if metric not in ALLOWED_OBJECTIVE_METRICS:
+        if metric not in allowed_metrics:
             metric = "manual_review"
 
-        activate_phase = _phase_number(
+        text = str(
             objective.get(
-                "activate_phase",
-                1,
-            ),
-            phases,
-        )
+                "text",
+                objective.get(
+                    "description",
+                    objective.get(
+                        "objective",
+                        "Bereik je persoonlijke doel.",
+                    ),
+                ),
+            )
+        ).strip()
 
-        result.append(
+        if not text:
+            text = (
+                "Bereik je persoonlijke doel."
+            )
+
+        normalized.append(
             {
                 "id": str(
                     objective.get(
                         "id",
-                        (
-                            f"{player_id}"
-                            f"-objective-{index}"
-                        ),
+                        f"{player_id}-objective-{index}",
                     )
                 ),
-                "text": str(
-                    objective.get(
-                        "text",
-                        objective.get(
-                            "description",
-                            objective.get(
-                                "objective",
-                                "Bereik je persoonlijke doel.",
-                            ),
-                        ),
-                    )
-                ),
+                "text": text,
                 "owner_player_id": player_id,
                 "measurable": bool(
                     objective.get(
@@ -1521,139 +1370,632 @@ def _normalize_objectives(
                     is not None
                     else None
                 ),
-                "activate_phase": activate_phase,
+                "activate_phase": _phase_number(
+                    objective.get(
+                        "activate_phase",
+                        1,
+                    ),
+                    phases,
+                ),
+            }
+        )
+
+    if not normalized:
+        normalized.append(
+            {
+                "id": (
+                    f"{player_id}-objective-1"
+                ),
+                "text": (
+                    "Bereik je persoonlijke doel."
+                ),
+                "owner_player_id": player_id,
+                "measurable": False,
+                "metric": "manual_review",
+                "target_player_id": None,
+                "target_value": None,
+                "activate_phase": 1,
+            }
+        )
+
+    return normalized
+
+
+# ============================================================
+# RELATIONSHIPS
+# ============================================================
+
+
+def _normalize_relationships(
+    value: Any,
+) -> list[str]:
+
+    if isinstance(
+        value,
+        dict,
+    ):
+        return [
+            f"{key}: {item}"
+            for key, item in value.items()
+        ]
+
+    if isinstance(
+        value,
+        str,
+    ):
+        return [
+            value
+        ] if value.strip() else []
+
+    if not isinstance(
+        value,
+        list,
+    ):
+        return []
+
+    return [
+        str(item).strip()
+        for item in value
+        if str(item).strip()
+    ]
+
+
+# ============================================================
+# EVENTS
+# ============================================================
+
+
+def _normalize_events(
+    events: Any,
+    phases: list[dict[str, Any]],
+    player_count: int,
+) -> list[dict[str, Any]]:
+
+    if not isinstance(
+        events,
+        list,
+    ):
+        events = []
+
+    result = []
+
+    for index, event in enumerate(
+        events,
+        start=1,
+    ):
+        if not isinstance(
+            event,
+            dict,
+        ):
+            continue
+
+        player_ids = event.get(
+            "player_ids",
+            [],
+        )
+
+        if isinstance(
+            player_ids,
+            str,
+        ):
+            player_ids = [
+                player_ids
+            ]
+
+        if not isinstance(
+            player_ids,
+            list,
+        ):
+            player_ids = []
+
+        player_ids = [
+            str(player_id)
+            for player_id in player_ids
+            if str(player_id).isdigit()
+            and 1
+            <= int(player_id)
+            <= player_count
+        ]
+
+        if not player_ids:
+            player_ids = [
+                str(
+                    ((index - 1) % player_count)
+                    + 1
+                )
+            ]
+
+        result.append(
+            {
+                "id": str(
+                    event.get(
+                        "id",
+                        event.get(
+                            "event_id",
+                            f"event-{index}",
+                        ),
+                    )
+                ),
+                "phase": _phase_number(
+                    event.get(
+                        "phase",
+                        event.get(
+                            "phase_id",
+                            1,
+                        ),
+                    ),
+                    phases,
+                ),
+                "title": str(
+                    event.get(
+                        "title",
+                        event.get(
+                            "name",
+                            f"Event {index}",
+                        ),
+                    )
+                ).strip()
+                or f"Event {index}",
+                "description": str(
+                    event.get(
+                        "description",
+                        event.get(
+                            "details",
+                            "Er gebeurt iets onverwachts.",
+                        ),
+                    )
+                ).strip(),
+                "delivery": _normalize_delivery(
+                    event.get(
+                        "delivery",
+                        "website",
+                    )
+                ),
+                "release_after_days": max(
+                    0,
+                    _safe_int(
+                        event.get(
+                            "release_after_days",
+                            0,
+                        ),
+                        0,
+                    ),
+                ),
+                "player_ids": player_ids,
             }
         )
 
     return result
 
 
-def _extract_clue_texts(
-    value: Any,
-) -> list[str]:
-    """
-    Converts all known AI clue formats to list[str].
+# ============================================================
+# VOTING
+# ============================================================
 
-    Handles:
-      "Een clue"
-      {"text": "Een clue"}
-      {"description": "Een clue"}
-      [{"text": "..."}]
-    """
 
-    if value is None:
-        return []
+def _normalize_voting_moments(
+    voting_moments: Any,
+    phases: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
 
-    if isinstance(value, str):
-        return (
-            [value.strip()]
-            if value.strip()
-            else []
-        )
-
-    if not isinstance(value, list):
-        return []
+    if not isinstance(
+        voting_moments,
+        list,
+    ):
+        voting_moments = []
 
     result = []
 
-    for item in value:
-        if isinstance(item, str):
-            text = item.strip()
-
-        elif isinstance(item, dict):
-            text = str(
-                item.get(
-                    "text",
-                    item.get(
-                        "description",
-                        item.get(
-                            "clue",
-                            "",
-                        ),
-                    ),
-                )
-            ).strip()
-
-        else:
+    for index, voting in enumerate(
+        voting_moments,
+        start=1,
+    ):
+        if not isinstance(
+            voting,
+            dict,
+        ):
             continue
 
-        if text and text not in result:
-            result.append(text)
+        result.append(
+            {
+                "id": str(
+                    voting.get(
+                        "id",
+                        voting.get(
+                            "voting_id",
+                            f"vote-{index}",
+                        ),
+                    )
+                ),
+                "phase": _phase_number(
+                    voting.get(
+                        "phase",
+                        voting.get(
+                            "phase_id",
+                            1,
+                        ),
+                    ),
+                    phases,
+                ),
+                "question": str(
+                    voting.get(
+                        "question",
+                        voting.get(
+                            "name",
+                            "Wie verdenken jullie?",
+                        ),
+                    )
+                ).strip()
+                or "Wie verdenken jullie?",
+                "release_after_days": max(
+                    0,
+                    _safe_int(
+                        voting.get(
+                            "release_after_days",
+                            0,
+                        ),
+                        0,
+                    ),
+                ),
+                "duration_hours": max(
+                    1,
+                    min(
+                        168,
+                        _safe_int(
+                            voting.get(
+                                "duration_hours",
+                                24,
+                            ),
+                            24,
+                        ),
+                    ),
+                ),
+            }
+        )
+
+    if not result:
+        result.append(
+            {
+                "id": "vote-1",
+                "phase": 1,
+                "question": (
+                    "Wie verdenken jullie "
+                    "op dit moment?"
+                ),
+                "release_after_days": 0,
+                "duration_hours": 24,
+            }
+        )
 
     return result
 
 
-def _make_clue(
-    *,
-    clue_id: str,
-    text: str,
-    owner_player_id: str,
-    phase: int,
-    clue_type: str,
-    visibility: str,
-    supports: list[str],
-    dependencies: list[str] | None = None,
-    red_herring: bool = False,
-) -> dict[str, Any]:
-    return {
-        "id": clue_id,
-        "text": text,
-        "clue_type": clue_type,
-        "owner_player_id": owner_player_id,
-        "release_phase": max(1, phase),
-        "visibility": visibility,
-        "supports": supports or ["solution"],
-        "dependencies": (
-            dependencies
-            if dependencies is not None
-            else []
-        ),
-        "red_herring": red_herring,
+# ============================================================
+# GLOBAL CLUES
+# ============================================================
+
+
+def _normalize_global_clues(
+    clues: Any,
+    names: list[str],
+    phases: list[dict[str, Any]],
+    clue_count: int,
+) -> list[dict[str, Any]]:
+
+    if not isinstance(
+        clues,
+        list,
+    ):
+        clues = []
+
+    result = []
+
+    allowed_types = {
+        "direct",
+        "indirect",
+        "relational",
+        "timeline",
+        "alibi",
+        "location",
+        "object",
+        "witness",
+        "confirming",
+        "crucial",
+        "red_herring",
+        "personal",
     }
 
-
-def _normalize_clue_type(
-    value: Any,
-) -> str:
-    value = str(
-        value or "direct"
-    ).lower().strip()
-
-    mapping = {
+    clue_type_map = {
         "information": "direct",
         "info": "direct",
         "fact": "direct",
+        "evidence": "confirming",
+        "secret": "personal",
         "hint": "indirect",
-        "relationship": "relational",
-        "relation": "relational",
-        "time": "timeline",
-        "alibi_clue": "alibi",
-        "place": "location",
-        "item": "object",
-        "person": "witness",
-        "confirmation": "confirming",
         "important": "crucial",
-        "false": "red_herring",
-        "personal_clue": "personal",
     }
 
-    value = mapping.get(
-        value,
-        value,
+    for index, clue in enumerate(
+        clues,
+        start=1,
+    ):
+        if not isinstance(
+            clue,
+            dict,
+        ):
+            continue
+
+        text = str(
+            clue.get(
+                "text",
+                clue.get(
+                    "description",
+                    "",
+                ),
+            )
+        ).strip()
+
+        if not text:
+            continue
+
+        clue_type = str(
+            clue.get(
+                "clue_type",
+                "direct",
+            )
+        ).lower().strip()
+
+        clue_type = clue_type_map.get(
+            clue_type,
+            clue_type,
+        )
+
+        if clue_type not in allowed_types:
+            clue_type = "direct"
+
+        supports = clue.get(
+            "supports",
+            [],
+        )
+
+        if isinstance(
+            supports,
+            str,
+        ):
+            supports = [
+                supports
+            ]
+
+        if not isinstance(
+            supports,
+            list,
+        ):
+            supports = []
+
+        supports = [
+            str(item).strip()
+            for item in supports
+            if str(item).strip()
+        ]
+
+        if not supports:
+            supports = [
+                "solution"
+            ]
+
+        dependencies = clue.get(
+            "dependencies",
+            [],
+        )
+
+        if isinstance(
+            dependencies,
+            str,
+        ):
+            dependencies = [
+                dependencies
+            ]
+
+        if not isinstance(
+            dependencies,
+            list,
+        ):
+            dependencies = []
+
+        owner = str(
+            clue.get(
+                "owner_player_id",
+                "1",
+            )
+        )
+
+        if (
+            not owner.isdigit()
+            or not 1
+            <= int(owner)
+            <= len(names)
+        ):
+            owner = "1"
+
+        result.append(
+            {
+                "id": str(
+                    clue.get(
+                        "id",
+                        clue.get(
+                            "clue_id",
+                            f"clue-{index}",
+                        ),
+                    )
+                ),
+                "text": text,
+                "clue_type": clue_type,
+                "owner_player_id": owner,
+                "release_phase": _phase_number(
+                    clue.get(
+                        "release_phase",
+                        clue.get(
+                            "phase",
+                            clue.get(
+                                "phase_id",
+                                1,
+                            ),
+                        ),
+                    ),
+                    phases,
+                ),
+                "visibility": _normalize_visibility(
+                    clue.get(
+                        "visibility",
+                        "public",
+                    )
+                ),
+                "supports": supports,
+                "dependencies": [
+                    str(item)
+                    for item in dependencies
+                ],
+                "red_herring": bool(
+                    clue.get(
+                        "red_herring",
+                        False,
+                    )
+                ),
+            }
+        )
+
+    # --------------------------------------------------------
+    # Zorg dat er genoeg globale clues zijn.
+    # --------------------------------------------------------
+
+    minimum = (
+        len(names)
+        * max(
+            1,
+            clue_count,
+        )
     )
 
+    existing_texts = {
+        clue["text"]
+        for clue in result
+    }
+
+    next_id = len(result) + 1
+
+    while len(result) < minimum:
+        owner = (
+            (len(result) % len(names))
+            + 1
+        )
+
+        text = (
+            f"Een extra observatie rond speler "
+            f"{owner} kan later belangrijk blijken."
+        )
+
+        # absoluut geen duplicate IDs/text.
+        while text in existing_texts:
+            text = (
+                f"Een extra observatie rond speler "
+                f"{owner} kan later belangrijk blijken "
+                f"({next_id})."
+            )
+
+        result.append(
+            {
+                "id": f"clue-{next_id}",
+                "text": text,
+                "clue_type": "indirect",
+                "owner_player_id": str(owner),
+                "release_phase": 1,
+                "visibility": "private",
+                "supports": [
+                    "investigation"
+                ],
+                "dependencies": [],
+                "red_herring": False,
+            }
+        )
+
+        existing_texts.add(text)
+        next_id += 1
+
+    return result
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+
+def _safe_int(
+    value: Any,
+    default: int | None,
+) -> int | None:
+
+    try:
+        if value is None:
+            return default
+
+        return int(value)
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return default
+
+
+def _string_list(
+    value: Any,
+) -> list[str]:
+
+    if isinstance(
+        value,
+        str,
+    ):
+        value = [
+            value
+        ]
+
+    if not isinstance(
+        value,
+        list,
+    ):
+        return [
+            "Onderzoek de situatie."
+        ]
+
+    result = [
+        str(item).strip()
+        for item in value
+        if str(item).strip()
+    ]
+
     return (
-        value
-        if value in ALLOWED_CLUE_TYPES
-        else "direct"
+        result
+        or [
+            "Onderzoek de situatie."
+        ]
     )
 
 
 def _normalize_delivery(
     value: Any,
 ) -> str:
+
+    allowed = {
+        "website",
+        "email",
+        "physical_clue",
+        "qr_code",
+        "whatsapp",
+        "printed_document",
+    }
+
     value = str(
-        value or "website"
+        value
     ).lower().strip()
 
     mapping = {
@@ -1674,7 +2016,7 @@ def _normalize_delivery(
 
     return (
         value
-        if value in ALLOWED_DELIVERIES
+        if value in allowed
         else "website"
     )
 
@@ -1682,8 +2024,15 @@ def _normalize_delivery(
 def _normalize_visibility(
     value: Any,
 ) -> str:
+
+    allowed = {
+        "public",
+        "private",
+        "shareable",
+    }
+
     value = str(
-        value or "public"
+        value
     ).lower().strip()
 
     mapping = {
@@ -1691,7 +2040,6 @@ def _normalize_visibility(
         "everyone": "public",
         "all": "public",
         "secret": "private",
-        "shared_with_players": "shareable",
     }
 
     value = mapping.get(
@@ -1701,273 +2049,14 @@ def _normalize_visibility(
 
     return (
         value
-        if value in ALLOWED_VISIBILITIES
+        if value in allowed
         else "public"
     )
 
 
-def _normalize_string_list(
-    value: Any,
-) -> list[str]:
-    if isinstance(value, str):
-        return (
-            [value.strip()]
-            if value.strip()
-            else []
-        )
-
-    if not isinstance(value, list):
-        return []
-
-    result = []
-
-    for item in value:
-        if isinstance(item, dict):
-            # Relationships occasionally come back as
-            # {"player": "...", "relationship": "..."}.
-            if "text" in item:
-                item = item["text"]
-            elif "description" in item:
-                item = item["description"]
-            else:
-                item = ", ".join(
-                    f"{key}: {value}"
-                    for key, value in item.items()
-                )
-
-        text = str(item).strip()
-
-        if text and text not in result:
-            result.append(text)
-
-    return result
-
-
-def _string_list(
-    value: Any,
-) -> list[str]:
-    result = _normalize_string_list(value)
-
-    return (
-        result
-        if result
-        else ["Onderzoek de situatie."]
-    )
-
-
-def _phase_number(
-    value: Any,
-    phases: list[dict[str, Any]],
-) -> int:
-    if isinstance(value, bool):
-        return 1
-
-    if isinstance(value, int):
-        return _clamp_phase(
-            value,
-            phases,
-        )
-
-    if isinstance(value, float):
-        return _clamp_phase(
-            int(value),
-            phases,
-        )
-
-    if isinstance(value, str):
-        clean = value.lower().strip()
-
-        if clean.isdigit():
-            return _clamp_phase(
-                int(clean),
-                phases,
-            )
-
-        for phase in phases:
-            if clean in {
-                str(
-                    phase.get(
-                        "name",
-                        ""
-                    )
-                ).lower().strip(),
-            }:
-                return phase["number"]
-
-    return 1
-
-
-def _clamp_phase(
-    value: int,
-    phases: list[dict[str, Any]],
-) -> int:
-    if not phases:
-        return 1
-
-    numbers = [
-        phase["number"]
-        for phase in phases
-    ]
-
-    minimum = min(numbers)
-    maximum = max(numbers)
-
-    return max(
-        minimum,
-        min(maximum, value),
-    )
-
-
-def _safe_int(
-    value: Any,
-    default: int | None,
-) -> int | None:
-    try:
-        if value is None:
-            return default
-
-        if isinstance(value, bool):
-            return default
-
-        return int(value)
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-        return default
-
-
-def _default_role(
-    game: dict[str, Any],
-) -> str:
-    roles = game.get("roles", [])
-
-    if roles:
-        return str(
-            roles[0].get(
-                "name",
-                "Speler",
-            )
-        )
-
-    return "Speler"
-
-
-def _fallback_clue_text(
-    player_id: str,
-    clue_number: int,
-) -> str:
-    fallback = [
-        "Er ontbreekt nog belangrijke informatie over het plan.",
-        "Iemand in de groep weet meer dan hij of zij vertelt.",
-        "Een detail uit de gebeurtenissen lijkt niet helemaal te kloppen.",
-        "De timing van een belangrijke gebeurtenis roept vragen op.",
-        "Niet alle informatie is met iedereen gedeeld.",
-    ]
-
-    return fallback[
-        (int(player_id) + clue_number - 2)
-        % len(fallback)
-    ]
-
-
-def _default_phase_name(
-    number: int,
-) -> str:
-    names = {
-        1: "De voorbereiding",
-        2: "Het onderzoek",
-        3: "De confrontatie",
-        4: "De onthulling",
-        5: "De finale",
-    }
-
-    return names.get(
-        number,
-        f"Fase {number}",
-    )
-
-
-def _default_phase_purpose(
-    number: int,
-) -> str:
-    purposes = {
-        1: "Verzamel de eerste informatie.",
-        2: "Leg verbanden tussen de clues.",
-        3: "Test theorieën en verdenkingen.",
-        4: "Breng tegenstrijdigheden aan het licht.",
-        5: "Los het mysterie definitief op.",
-    }
-
-    return purposes.get(
-        number,
-        "Onderzoek de situatie.",
-    )
-
-
-def _default_phase_day(
-    number: int,
-    duration: str,
-) -> int:
-    if duration == "avond":
-        return 0
-
-    if duration == "1_week":
-        return min(
-            number - 1,
-            6,
-        )
-
-    if duration == "2_weken":
-        return min(
-            (number - 1) * 3,
-            13,
-        )
-
-    if duration == "3_weken":
-        return min(
-            (number - 1) * 4,
-            20,
-        )
-
-    return min(
-        (number - 1) * 6,
-        30,
-    )
-
-
-def _minimum_phases(
-    duration: str,
-) -> int:
-    if duration == "1_maand":
-        return 5
-
-    if duration in {
-        "2_weken",
-        "3_weken",
-    }:
-        return 3
-
-    if duration == "1_week":
-        return 2
-
-    return 1
-
-
-def _minimum_votes(
-    duration: str,
-) -> int:
-    if duration == "1_maand":
-        return 3
-
-    if duration in {
-        "2_weken",
-        "3_weken",
-    }:
-        return 2
-
-    return 1
+# ============================================================
+# VALIDATION
+# ============================================================
 
 
 def _validate_generation(
@@ -1978,6 +2067,7 @@ def _validate_generation(
     requested_difficulty: str,
     requested_duration: str,
 ) -> None:
+
     if generated.game_id != game["id"]:
         raise ValueError(
             "canonical game_id must match selected game"
@@ -2018,31 +2108,48 @@ def _validate_generation(
             f"received {len(generated.players)}"
         )
 
-    expected_player_ids = {
+    expected_ids = {
         str(index + 1)
         for index in range(len(names))
     }
 
-    actual_player_ids = {
+    actual_ids = {
         player.player_id
         for player in generated.players
     }
 
-    if actual_player_ids != expected_player_ids:
+    if actual_ids != expected_ids:
         raise ValueError(
             "player_id values must be unique "
             "and sequential"
         )
 
     role_names = {
-        role["name"]
-        for role in game.get("roles", [])
+        str(role.get("name", "")).strip()
+        for role in game.get(
+            "roles",
+            [],
+        )
+        if isinstance(
+            role,
+            dict,
+        )
     }
+
+    # --------------------------------------------------------
+    # PLAYER VALIDATION
+    # --------------------------------------------------------
+
+    boss_players = []
 
     for index, player in enumerate(
         generated.players
     ):
-        if player.player_id != str(index + 1):
+        expected_id = str(
+            index + 1
+        )
+
+        if player.player_id != expected_id:
             raise ValueError(
                 f"player {index + 1} "
                 f"has invalid player_id"
@@ -2054,10 +2161,19 @@ def _validate_generation(
                 f"has invalid name"
             )
 
-        if role_names and player.role not in role_names:
+        if player.role not in role_names:
             raise ValueError(
                 f"player {index + 1} "
-                f"has invalid role: {player.role}"
+                f"has invalid role: "
+                f"{player.role}"
+            )
+
+        if (
+            player.role.lower().strip()
+            == "boss"
+        ):
+            boss_players.append(
+                player
             )
 
         if len(player.clues) < max(
@@ -2069,34 +2185,33 @@ def _validate_generation(
                 f"has insufficient clues"
             )
 
-        if not player.personal_objectives:
+        if not player.objective.strip():
             raise ValueError(
                 f"player {index + 1} "
-                f"has no personal objective"
+                f"has no objective"
             )
 
-        for objective in player.personal_objectives:
-            if (
-                objective.owner_player_id
-                != player.player_id
-            ):
-                raise ValueError(
-                    f"objective {objective.id} "
-                    f"belongs to "
-                    f"{objective.owner_player_id}, "
-                    f"but is assigned to "
-                    f"{player.player_id}"
-                )
+        if not player.instructions.strip():
+            raise ValueError(
+                f"player {index + 1} "
+                f"has no instructions"
+            )
 
-            if objective.activate_phase not in {
-                phase.number
-                for phase in generated.phases
-            }:
-                raise ValueError(
-                    f"objective {objective.id} "
-                    f"references unknown phase "
-                    f"{objective.activate_phase}"
-                )
+    # --------------------------------------------------------
+    # EXACTLY ONE BOSS
+    # --------------------------------------------------------
+
+    if boss_players and len(
+        boss_players
+    ) != 1:
+        raise ValueError(
+            f"expected exactly one Boss, "
+            f"received {len(boss_players)}"
+        )
+
+    # --------------------------------------------------------
+    # SABOTEURS
+    # --------------------------------------------------------
 
     actual_saboteurs = sum(
         1
@@ -2104,23 +2219,41 @@ def _validate_generation(
         if player.is_saboteur
     )
 
+    if actual_saboteurs < 1:
+        raise ValueError(
+            "at least one saboteur is required"
+        )
+
     if generated.saboteur_count != actual_saboteurs:
         raise ValueError(
             "saboteur_count does not match "
             "player assignments"
         )
 
-    if actual_saboteurs < 1:
-        raise ValueError(
-            "at least one saboteur is required"
-        )
+    # --------------------------------------------------------
+    # PHASES
+    # --------------------------------------------------------
 
-    minimum_phases = _minimum_phases(
-        requested_duration
+    minimum_phases = (
+        5
+        if requested_duration == "1_maand"
+        else 3
+        if requested_duration in {
+            "2_weken",
+            "3_weken",
+        }
+        else 1
     )
 
-    minimum_votes = _minimum_votes(
-        requested_duration
+    minimum_votes = (
+        3
+        if requested_duration == "1_maand"
+        else 2
+        if requested_duration in {
+            "2_weken",
+            "3_weken",
+        }
+        else 1
     )
 
     if len(generated.phases) < minimum_phases:
@@ -2129,7 +2262,9 @@ def _validate_generation(
             f"{minimum_phases} phases"
         )
 
-    if len(generated.voting_moments) < minimum_votes:
+    if len(
+        generated.voting_moments
+    ) < minimum_votes:
         raise ValueError(
             f"duration requires at least "
             f"{minimum_votes} voting moments"
@@ -2146,6 +2281,10 @@ def _validate_generation(
         raise ValueError(
             "phase numbers must be unique"
         )
+
+    # --------------------------------------------------------
+    # VOTING
+    # --------------------------------------------------------
 
     voting_ids = [
         voting.id
@@ -2166,6 +2305,10 @@ def _validate_generation(
                 f"references unknown phase "
                 f"{voting.phase}"
             )
+
+    # --------------------------------------------------------
+    # EVENTS
+    # --------------------------------------------------------
 
     event_ids = [
         event.id
@@ -2188,12 +2331,16 @@ def _validate_generation(
             )
 
         for player_id in event.player_ids:
-            if player_id not in actual_player_ids:
+            if player_id not in actual_ids:
                 raise ValueError(
                     f"event {event.id} "
                     f"references unknown player "
                     f"{player_id}"
                 )
+
+    # --------------------------------------------------------
+    # GLOBAL CLUES
+    # --------------------------------------------------------
 
     clue_ids = [
         clue.id
@@ -2208,52 +2355,45 @@ def _validate_generation(
         )
 
     minimum_global_clues = (
-        len(names) * max(
-            2,
+        len(names)
+        * max(
+            1,
             clue_count,
         )
     )
 
-    if len(generated.clues) < minimum_global_clues:
+    if len(
+        generated.clues
+    ) < minimum_global_clues:
         raise ValueError(
             f"expected at least "
             f"{minimum_global_clues} global clues, "
-            f"received {len(generated.clues)}"
+            f"received "
+            f"{len(generated.clues)}"
         )
 
     for clue in generated.clues:
-        if clue.owner_player_id not in actual_player_ids:
+
+        if clue.owner_player_id not in actual_ids:
             raise ValueError(
-                f"clue {clue.id} "
-                f"references unknown owner "
+                f"clue {clue.id} references "
+                f"unknown owner "
                 f"{clue.owner_player_id}"
             )
 
         if clue.release_phase not in phase_numbers:
             raise ValueError(
-                f"clue {clue.id} "
-                f"references unknown phase "
+                f"clue {clue.id} references "
+                f"unknown phase "
                 f"{clue.release_phase}"
-            )
-
-        if not clue.text.strip():
-            raise ValueError(
-                f"clue {clue.id} "
-                f"has empty text"
-            )
-
-        if not clue.supports:
-            raise ValueError(
-                f"clue {clue.id} "
-                f"has no supports"
             )
 
         for dependency in clue.dependencies:
             if dependency not in clue_ids:
                 raise ValueError(
-                    f"clue {clue.id} "
-                    f"references unknown "
-                    f"dependency {dependency}"
+                    f"clue {clue.id} references "
+                    f"unknown dependency "
+                    f"{dependency}"
                 )
 
 
